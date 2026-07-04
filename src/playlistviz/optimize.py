@@ -37,7 +37,8 @@ class ESHistory:
 
 
 def make_objective(op: PlaylistOperator, w: np.ndarray, zcfg: ZConfig,
-                   resolution: int) -> Callable[[np.ndarray], EvalResult]:
+                   resolution: int, gray: bool = False,
+                   ) -> Callable[[np.ndarray], EvalResult]:
     """Bind the full theta -> loss pipeline for a fixed operator and weights."""
     env = song_envelopes(op.X)
 
@@ -46,7 +47,7 @@ def make_objective(op: PlaylistOperator, w: np.ndarray, zcfg: ZConfig,
         zf = generate_Z(params, op.D, zcfg, envelopes=env,
                         project_perp=op.project_perp)
         L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
-        img = render(L, R, resolution, params)
+        img = render(L, R, resolution, params, gray=gray)
         phi = features(img)
         return EvalResult(theta=theta.copy(), loss=scalar_loss(phi, w),
                           phi=phi, image=img)

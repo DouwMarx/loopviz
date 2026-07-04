@@ -22,15 +22,26 @@ comparisons (Bradley–Terry).
 ## Pipeline
 
 ```
-playlistviz download --links-file links.txt   # yt-dlp -> mono wavs, playlist order
-playlistviz build                             # X (D x N), factored A0, verification
-playlistviz optimize                          # baseline + Dirichlet weight sweep (9 candidates)
+playlistviz download --links-file links.txt   # direct youtube URLs (or ytsearch1: queries)
+playlistviz build [--sample-rate 8000 --seconds 12]   # X (D x N), factored A0, verification
+playlistviz optimize --replicates 2 --jobs 7  # Dirichlet weight sweep x ES-seed replicates
 playlistviz compare                           # web UI: click the render you prefer
 playlistviz fit                               # Bradley-Terry fit of your metric weights
 playlistviz optimize --weights runs/fitted_weights.json   # re-optimize under YOUR weights
 playlistviz render <candidate> --resolution 4096 --bits 16  # print export
 playlistviz report                            # all candidates on the equal-weight yardstick
 ```
+
+Optimization is **grayscale by default** (color metrics excluded from the
+loss, palette degenerates to a free tone curve); pass `--color` to optimize
+in color. `--replicates N` reruns each weight draw under N different ES
+seeds so a BT preference can be attributed to the weights rather than one
+lucky basin. `--z-rank` trades texture richness against compute.
+
+Quick experiments live in `scripts/`:
+- `exp_padding.py` — zero-padding vs center-cropping for unequal song lengths
+- `exp_free_aesthetics.py` — pure aesthetic optimization with no music
+  constraint (the reference for what the constraint costs visually)
 
 ## How A is rendered without materializing it
 
@@ -104,7 +115,8 @@ src/playlistviz/
   bt.py         Bradley-Terry fit + D-optimal pair selection
   compare_server.py  stdlib web UI for pairwise choices
   cli.py        the pipeline commands
-tests/          55 tests, no network needed (synthetic songs)
+scripts/        quick one-off experiments (padding, unconstrained baseline)
+tests/          60 tests, no network needed (synthetic songs)
 ```
 
 ## Setup

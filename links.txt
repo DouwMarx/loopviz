@@ -1,4 +1,8 @@
-# playlist, in cyclic order: one link or ytsearch query per line
+# One entry per line, in cyclic playlist order.
+# Preferred: direct youtube URLs, e.g.
+#   https://www.youtube.com/watch?v=WNcsUNKlAKw
+# Fallback: yt-dlp search queries ("ytsearch1:<query>" takes the top hit) -
+# used below because this playlist was seeded without concrete URLs.
 ytsearch1:Debussy Clair de Lune piano
 ytsearch1:Miles Davis So What
 ytsearch1:Aphex Twin Avril 14th

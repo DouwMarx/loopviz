@@ -39,15 +39,41 @@ def scalar_loss(phi: np.ndarray, w: np.ndarray) -> float:
     return float(w @ loss_vector(phi) + barrier(phi))
 
 
-def equal_weights() -> np.ndarray:
-    return np.full(N_METRICS, 1.0 / N_METRICS)
+# metrics that are meaningful on a grayscale image (color metrics excluded:
+# colorfulness, hue_dispersion, mean_saturation)
+GRAY_METRICS = [n for n in METRIC_NAMES
+                if n not in ("colorfulness", "hue_dispersion", "mean_saturation")]
+GRAY_IDX = np.array([_IDX[n] for n in GRAY_METRICS])
 
 
-def sample_weights(alpha: float, rng: np.random.Generator) -> np.ndarray:
-    """Dirichlet(alpha * 1) draw on the simplex; alpha=inf -> equal weights."""
+def metric_mask(gray: bool) -> np.ndarray:
+    """Boolean mask of active metrics for the given mode."""
+    mask = np.ones(N_METRICS, dtype=bool)
+    if gray:
+        mask[:] = False
+        mask[GRAY_IDX] = True
+    return mask
+
+
+def equal_weights(mask: np.ndarray | None = None) -> np.ndarray:
+    """Uniform weights over active metrics (zeros elsewhere), summing to 1."""
+    if mask is None:
+        return np.full(N_METRICS, 1.0 / N_METRICS)
+    w = np.zeros(N_METRICS)
+    w[mask] = 1.0 / mask.sum()
+    return w
+
+
+def sample_weights(alpha: float, rng: np.random.Generator,
+                   mask: np.ndarray | None = None) -> np.ndarray:
+    """Dirichlet(alpha * 1) draw on the (masked) simplex; alpha=inf -> equal."""
     if not np.isfinite(alpha):
-        return equal_weights()
-    return rng.dirichlet(np.full(N_METRICS, alpha))
+        return equal_weights(mask)
+    if mask is None:
+        return rng.dirichlet(np.full(N_METRICS, alpha))
+    w = np.zeros(N_METRICS)
+    w[mask] = rng.dirichlet(np.full(int(mask.sum()), alpha))
+    return w
 
 
 # The Dirichlet annealing schedule from the spec: (alpha, number of runs)

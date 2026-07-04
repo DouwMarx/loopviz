@@ -88,6 +88,8 @@ class CompareState:
     def _load_loss_vectors(self) -> dict[str, np.ndarray]:
         out = {}
         for f in sorted(self.runs_dir.glob("*/candidate.json")):
+            if f.parent.name.startswith("exp_"):
+                continue  # experiment outputs are not comparison candidates
             d = json.loads(f.read_text())
             out[d["id"]] = np.asarray(d["loss_vector"])
         return out

@@ -90,9 +90,19 @@ def cosine_palette(t: np.ndarray, params: dict[str, float]) -> np.ndarray:
     return np.clip(out, 0.0, 1.0)
 
 
-def render(L: np.ndarray, R: np.ndarray, P: int, params: dict[str, float]) -> np.ndarray:
-    """Full render: factored A -> (P, P, 3) float RGB in [0, 1]."""
-    return cosine_palette(scalar_field(L, R, P, params), params)
+def render(L: np.ndarray, R: np.ndarray, P: int, params: dict[str, float],
+           gray: bool = False) -> np.ndarray:
+    """Full render: factored A -> (P, P, 3) float RGB in [0, 1].
+
+    gray: collapse the palette output to luminance (the palette then acts as
+    a free nonmonotonic tone curve, as in the aesthetic-optimization spec's
+    grayscale runs).
+    """
+    img = cosine_palette(scalar_field(L, R, P, params), params)
+    if gray:
+        lum = 0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]
+        img = np.repeat(lum[..., None], 3, axis=-1)
+    return img
 
 
 def save_png(img: np.ndarray, path, bit_depth: int = 8) -> None:

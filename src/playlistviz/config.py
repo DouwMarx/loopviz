@@ -19,7 +19,7 @@ class AudioConfig:
 
 @dataclass(frozen=True)
 class ZConfig:
-    rank: int = 16          # rank of the free perturbation Z = U V^T
+    rank: int = 32          # rank of the free perturbation Z = U V^T
     seed: int = 7           # base seed; noise fields are deterministic given (seed, theta)
 
 

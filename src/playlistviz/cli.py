@@ -23,8 +23,8 @@ from . import bt
 from .config import AudioConfig, OptConfig, Paths, RenderConfig, ZConfig
 from .ingest import (build_song_matrix, download, load_matrix, read_titles,
                      save_matrix)
-from .loss import (DEFAULT_SCHEDULE, equal_weights, loss_vector, sample_weights,
-                   scalar_loss)
+from .loss import (DEFAULT_SCHEDULE, equal_weights, loss_vector, metric_mask,
+                   sample_weights, scalar_loss)
 from .metrics import METRIC_NAMES, features
 from .operator import PlaylistOperator
 from .optimize import make_objective, run_es
@@ -61,7 +61,8 @@ def cmd_download(args) -> None:
 
 def cmd_build(args) -> None:
     paths = _paths(args)
-    cfg = AudioConfig()
+    cfg = AudioConfig(sample_rate=args.sample_rate,
+                      excerpt_seconds=args.seconds)
     wavs = sorted(paths.audio.glob("[0-9][0-9][0-9].wav"))
     if len(wavs) < 2:
         raise SystemExit(f"need at least 2 wavs in {paths.audio}")
@@ -82,12 +83,16 @@ def cmd_build(args) -> None:
 
 def _save_candidate(paths: Paths, cand_id: str, w: np.ndarray, alpha,
                     theta: np.ndarray, phi: np.ndarray, loss_eq: float,
-                    img_presentation: np.ndarray) -> None:
+                    img_presentation: np.ndarray, gray: bool,
+                    z_rank: int, es_seed: int) -> None:
     d = paths.runs / cand_id
     d.mkdir(parents=True, exist_ok=True)
     save_png(img_presentation, d / "presentation.png")
     (d / "candidate.json").write_text(json.dumps({
         "id": cand_id,
+        "mode": "gray" if gray else "color",
+        "z_rank": z_rank,
+        "es_seed": es_seed,
         "alpha": None if alpha is None else (None if np.isinf(alpha) else alpha),
         "weights": list(map(float, w)),
         "theta": list(map(float, theta)),
@@ -99,22 +104,21 @@ def _save_candidate(paths: Paths, cand_id: str, w: np.ndarray, alpha,
 
 def _optimize_one(op: PlaylistOperator, w: np.ndarray, alpha, cand_id: str,
                   paths: Paths, zcfg: ZConfig, rcfg: RenderConfig,
-                  ocfg: OptConfig) -> float:
-    objective = make_objective(op, w, zcfg, rcfg.opt_resolution)
-    print(f"[{cand_id}] ES: {ocfg.generations} gens x {ocfg.population} "
-          f"at {rcfg.opt_resolution}px")
-    best, hist = run_es(objective, ocfg,
-                        progress=lambda g, l: print(f"  gen {g:2d}  loss {l:.3f}"))
+                  ocfg: OptConfig, gray: bool, verbose: bool = True) -> float:
+    objective = make_objective(op, w, zcfg, rcfg.opt_resolution, gray=gray)
+    progress = (lambda g, l: print(f"  gen {g:2d}  loss {l:.3f}")) if verbose else None
+    best, hist = run_es(objective, ocfg, progress=progress)
 
     # re-render the winner at presentation resolution and re-measure there
     params = theta_to_params(best.theta)
     env = song_envelopes(op.X)
     zf = generate_Z(params, op.D, zcfg, envelopes=env, project_perp=op.project_perp)
     L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
-    img = render(L, R, min(rcfg.presentation_resolution, op.D), params)
+    img = render(L, R, min(rcfg.presentation_resolution, op.D), params, gray=gray)
     phi = features(img)
-    loss_eq = scalar_loss(phi, equal_weights())
-    _save_candidate(paths, cand_id, w, alpha, best.theta, phi, loss_eq, img)
+    loss_eq = scalar_loss(phi, equal_weights(metric_mask(gray)))
+    _save_candidate(paths, cand_id, w, alpha, best.theta, phi, loss_eq, img,
+                    gray, zcfg.rank, ocfg.seed)
 
     # invariant: aesthetics never touched playback
     err = op.playback_error(U=zf.U, Vp=zf.Vp, scale=zf.scale)
@@ -122,37 +126,69 @@ def _optimize_one(op: PlaylistOperator, w: np.ndarray, alpha, cand_id: str,
     return loss_eq
 
 
+def _run_job(job: dict) -> tuple[str, float]:
+    """Worker for parallel optimization; re-creates state from paths."""
+    paths = Paths(root=Path(job["root"]))
+    X, _ = load_matrix(paths.data / "songs.npz")
+    op = PlaylistOperator.from_songs(X)
+    zcfg = ZConfig(rank=job["z_rank"])
+    rcfg = RenderConfig()
+    ocfg = OptConfig(generations=job["generations"], population=job["population"],
+                     seed=job["es_seed"])
+    loss_eq = _optimize_one(op, np.asarray(job["w"]), job["alpha"], job["id"],
+                            paths, zcfg, rcfg, ocfg, job["gray"],
+                            verbose=job["verbose"])
+    return job["id"], loss_eq
+
+
 def cmd_optimize(args) -> None:
     paths = _paths(args)
-    op = _load_operator(paths)
-    zcfg, rcfg = ZConfig(), RenderConfig()
+    _load_operator(paths)  # fail fast with a clear message
+    gray = not args.color
+    mask = metric_mask(gray)
     rng = np.random.default_rng(args.seed)
 
-    jobs: list[tuple[str, np.ndarray, object]] = []
+    draws: list[tuple[str, np.ndarray, object]] = []
     if args.weights:
         w = np.asarray(json.loads(Path(args.weights).read_text())["w_simplex"])
-        jobs.append(("fitted", w, None))
+        draws.append(("fitted", w, None))
     elif args.baseline:
-        jobs.append(("baseline_eq", equal_weights(), float("inf")))
+        draws.append(("baseline_eq", equal_weights(mask), float("inf")))
     else:  # full schedule
         for alpha, n_runs in DEFAULT_SCHEDULE:
             for r in range(n_runs):
                 tag = "inf" if np.isinf(alpha) else f"{alpha:g}"
                 cand_id = f"a{tag}_r{r}" if not np.isinf(alpha) else "baseline_eq"
-                jobs.append((cand_id, sample_weights(alpha, rng), alpha))
+                draws.append((cand_id, sample_weights(alpha, rng, mask), alpha))
 
-    results = []
-    for idx, (cand_id, w, alpha) in enumerate(jobs):
-        # distinct seed per run: distinct search subspace and mutation
-        # sequence, so candidates are visually diverse, not just re-weighted
-        ocfg = OptConfig(generations=args.generations, population=args.population,
-                         seed=args.seed + 1000 * idx)
-        loss_eq = _optimize_one(op, w, alpha, cand_id, paths, zcfg, rcfg, ocfg)
-        results.append((cand_id, loss_eq))
+    # replicate each weight draw across ES seeds so a preference for a
+    # candidate can be attributed to its weights, not one lucky basin
+    jobs = []
+    for idx, (cand_id, w, alpha) in enumerate(draws):
+        for rep in range(args.replicates):
+            full_id = cand_id if args.replicates == 1 else f"{cand_id}_s{rep}"
+            jobs.append({
+                "id": full_id, "w": list(map(float, w)), "alpha": alpha,
+                "es_seed": args.seed + 1000 * idx + 101 * rep,
+                "gray": gray, "z_rank": args.z_rank, "root": str(paths.root),
+                "generations": args.generations, "population": args.population,
+                "verbose": args.jobs == 1,
+            })
 
-    print("\ncommon yardstick (equal-weight loss, lower is better):")
+    mode = "grayscale" if gray else "color"
+    print(f"{len(jobs)} ES runs ({mode}, Z rank {args.z_rank}, "
+          f"{args.jobs} parallel jobs)")
+
+    if args.jobs > 1:
+        import concurrent.futures as cf
+        with cf.ProcessPoolExecutor(max_workers=args.jobs) as ex:
+            results = list(ex.map(_run_job, jobs))
+    else:
+        results = [_run_job(j) for j in jobs]
+
+    print("\ncommon yardstick (equal-weight loss over active metrics):")
     for cand_id, loss_eq in sorted(results, key=lambda t: t[1]):
-        print(f"  {cand_id:16s} L_eq = {loss_eq:.3f}")
+        print(f"  {cand_id:20s} L_eq = {loss_eq:.3f}")
 
 
 def cmd_render(args) -> None:
@@ -163,13 +199,13 @@ def cmd_render(args) -> None:
         raise SystemExit(f"no candidate {args.candidate} in {paths.runs}")
     cand = json.loads(cand_file.read_text())
     params = theta_to_params(np.asarray(cand["theta"]))
-    zcfg = ZConfig()
+    zcfg = ZConfig(rank=cand.get("z_rank", ZConfig().rank))
     env = song_envelopes(op.X)
     zf = generate_Z(params, op.D, zcfg, envelopes=env, project_perp=op.project_perp)
     L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
     P = min(args.resolution, op.D)
     print(f"rendering {args.candidate} at {P}x{P}, {args.bits}-bit...")
-    img = render(L, R, P, params)
+    img = render(L, R, P, params, gray=cand.get("mode") == "gray")
     out = paths.runs / args.candidate / f"print_{P}.png"
     save_png(img, out, bit_depth=args.bits)
     print(f"wrote {out}")
@@ -187,10 +223,18 @@ def cmd_fit(args) -> None:
     if not comps:
         raise SystemExit("no comparisons recorded - run `playlistviz compare` first")
     loss_vectors = {}
+    modes = set()
     for f in sorted(paths.runs.glob("*/candidate.json")):
+        if f.parent.name.startswith("exp_"):
+            continue
         d = json.loads(f.read_text())
         loss_vectors[d["id"]] = np.asarray(d["loss_vector"])
-    fit = bt.fit_bt(comps, loss_vectors, l2=args.l2)
+        modes.add(d.get("mode", "color"))
+    active = None
+    if modes == {"gray"}:
+        active = metric_mask(gray=True)
+        print("grayscale pool: color metrics excluded from the fit\n")
+    fit = bt.fit_bt(comps, loss_vectors, l2=args.l2, active=active)
     se = fit.std_errors()
 
     print(f"Bradley-Terry fit on {fit.n_comparisons} comparisons "
@@ -219,18 +263,21 @@ def cmd_report(args) -> None:
     paths = _paths(args)
     cands = []
     for f in sorted(paths.runs.glob("*/candidate.json")):
+        if f.parent.name.startswith("exp_"):
+            continue
         cands.append(json.loads(f.read_text()))
     if not cands:
         raise SystemExit("no candidates yet")
     cands.sort(key=lambda d: d["loss_eq"])
-    print(f"{'candidate':16s} {'alpha':>6s} {'L_eq':>8s}   top weighted metrics")
+    print(f"{'candidate':20s} {'mode':>5s} {'alpha':>6s} {'L_eq':>8s}   top weighted metrics")
     for d in cands:
         w = np.asarray(d["weights"])
         top = np.argsort(-w)[:3]
         tops = ", ".join(f"{METRIC_NAMES[i]}={w[i]:.2f}" for i in top)
         alpha = d.get("alpha")
         alpha_s = "eq" if alpha is None else f"{alpha:g}"
-        print(f"{d['id']:16s} {alpha_s:>6s} {d['loss_eq']:8.3f}   {tops}")
+        print(f"{d['id']:20s} {d.get('mode', '?'):>5s} {alpha_s:>6s} "
+              f"{d['loss_eq']:8.3f}   {tops}")
 
 
 # -- entry point ---------------------------------------------------------------
@@ -247,11 +294,27 @@ def main(argv=None) -> None:
     p.set_defaults(fn=cmd_download)
 
     p = sub.add_parser("build", help="build song matrix X and verify the operator")
+    p.add_argument("--sample-rate", type=int, default=8000,
+                   help="Hz; the operator is exact at any rate, this only "
+                        "sets playback fidelity (default 8000)")
+    p.add_argument("--seconds", type=float, default=12.0,
+                   help="excerpt length per song (center-cropped; shorter "
+                        "songs are zero-padded)")
     p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("optimize", help="ES-optimize the free part of A")
     p.add_argument("--baseline", action="store_true", help="equal weights only")
     p.add_argument("--weights", help="fitted_weights.json to optimize under")
+    p.add_argument("--color", action="store_true",
+                   help="optimize in color (default: grayscale, color "
+                        "metrics excluded)")
+    p.add_argument("--replicates", type=int, default=1,
+                   help="ES runs per weight draw (different seeds), to "
+                        "separate weight effects from basin luck")
+    p.add_argument("--jobs", type=int, default=1,
+                   help="parallel worker processes")
+    p.add_argument("--z-rank", type=int, default=ZConfig().rank,
+                   help="rank of the free part Z (texture richness vs cost)")
     p.add_argument("--generations", type=int, default=14)
     p.add_argument("--population", type=int, default=12)
     p.add_argument("--seed", type=int, default=0)
