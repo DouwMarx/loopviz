@@ -1,15 +1,35 @@
 """Parametric generator for the free part Z = U V^T of the playlist operator.
 
-Z lives in the D(D-r)-dimensional family that is invisible to playback
-(it is always applied through P_perp). We parameterize a low-rank slice of it
-with a small theta vector: spectral 1/f^beta noise columns, optionally
-amplitude-modulated by the song envelopes so the free part stays visually
-tied to the actual audio, with smooth phase warping and ridge sparsification.
+The math. All exact playlist operators form the family
 
-Everything is deterministic given (seed, theta). The white spectra and warp
-displacement fields depend only on (seed, rank, D), so they are cached in a
-ZGenerator and each theta evaluation costs one batched irfft plus cheap
-elementwise work (this was the ES bottleneck before caching).
+    A = A0 + Z P_perp,     A0 = X_next G^{-1} X^T,   P_perp = I - X G^{-1} X^T.
+
+P_perp annihilates every song, so Z (a D x D matrix, D(D-r) free dimensions)
+is *inaudible*: it only acts on vectors outside the song span. We spend it on
+the picture. Materializing a D x D Z is impossible, so we take a rank-q slice
+
+    Z = U V^T,   U, V in R^{D x q},
+
+and generate U, V procedurally from a small parameter vector theta.
+
+Column model (the image is built from outer products col_U * col_V^T, so
+column structure is directly visible texture):
+
+    col_k = window_k(t) * noise_k(t) * songmod_k(t), then ridge-sharpened
+
+- noise_k: 1/f^beta_k spectral noise; beta_k = beta_center +- beta_spread
+  (per-column offsets cached), so columns span a range of roughnesses.
+- window_k: mixture of Gaussian bumps at cached random centers with widths
+  set by theta. locality=0 -> global support (full-length streaks in the
+  image); locality=1 -> compact blobs. This is the anti-"line-ey" lever:
+  a localized column contributes a local patch, not a full-width line.
+- songmod_k: optional amplitude modulation by the |audio| envelope of song
+  k mod N (env_mix in theta), tying the texture to the actual music.
+
+Everything is deterministic given (seed, theta). The theta-independent
+randomness (white spectra, bump centers, per-column offsets) is cached in a
+ZGenerator; each theta evaluation costs one batched irfft plus elementwise
+work.
 """
 
 from __future__ import annotations
@@ -23,31 +43,32 @@ from .config import ZConfig
 # theta layout: name -> (low, high). Values arrive in [0, 1] from the
 # optimizer's sigmoid map and are affinely mapped into these ranges.
 PARAM_RANGES: dict[str, tuple[float, float]] = {
-    # Z structure
-    "beta_u": (0.2, 3.0),        # spectral slope of U noise columns
-    "beta_v": (0.2, 3.0),        # spectral slope of V noise columns
-    "log_amp": (-2.5, 1.5),      # log10 amplitude of Z relative to A0 factor scale
-    "env_mix_u": (0.0, 1.0),     # envelope modulation of U by the songs
+    # Z column structure
+    "beta_u": (0.2, 3.6),          # spectral slope center, U columns
+    "beta_v": (0.2, 3.6),          # spectral slope center, V columns
+    "beta_spread": (0.0, 1.2),     # per-column slope diversity
+    "locality": (0.0, 0.97),       # 0 global streaks -> 1 compact blobs
+    "log_width": (-3.3, -0.7),     # log10 bump width as fraction of D
+    "width_spread": (0.0, 1.0),    # per-column width diversity (decades)
+    "log_amp": (-2.5, 1.5),        # log10 amplitude of Z relative to A0
+    "env_mix_u": (0.0, 1.0),       # song-envelope modulation of U
     "env_mix_v": (0.0, 1.0),
-    "warp_u": (0.0, 0.8),        # smooth phase warp strength
-    "warp_v": (0.0, 0.8),
-    "ridge_amount": (0.0, 1.0),  # sparsifying ridge mix
+    "ridge_amount": (0.0, 1.0),    # sparsifying tanh mix
     "ridge_sharp": (1.0, 16.0),
-    # rendering / tone
-    "energy_mix": (0.0, 1.0),    # blend of block-energy vs signed block-mean image
-    "log_compress": (0.0, 2.0),  # log10 of log1p compression factor
+    # rendering / tone (grayscale)
+    "energy_mix": (0.0, 1.0),      # blend of block-energy vs signed block-mean
+    "log_compress": (0.0, 2.0),    # log10 of log1p compression factor
     "gamma": (0.4, 2.4),
     "vignette": (0.0, 0.6),
-    # cosine palette rgb = a + b cos(2 pi (c t + d)), 3 channels each.
-    # In gray mode the palette collapses to a free nonmonotonic tone curve.
-    "pal_a_r": (0.2, 0.8), "pal_a_g": (0.2, 0.8), "pal_a_b": (0.2, 0.8),
-    "pal_b_r": (0.0, 0.5), "pal_b_g": (0.0, 0.5), "pal_b_b": (0.0, 0.5),
-    "pal_c_r": (0.25, 1.5), "pal_c_g": (0.25, 1.5), "pal_c_b": (0.25, 1.5),
-    "pal_d_r": (0.0, 1.0), "pal_d_g": (0.0, 1.0), "pal_d_b": (0.0, 1.0),
+    # free nonmonotonic tone curve: y = t + sum_i b_i cos(2 pi (c_i t + d_i))
+    "tone_b1": (0.0, 0.35), "tone_c1": (0.25, 2.0), "tone_d1": (0.0, 1.0),
+    "tone_b2": (0.0, 0.35), "tone_c2": (0.25, 2.0), "tone_d2": (0.0, 1.0),
 }
 
 PARAM_NAMES = list(PARAM_RANGES)
 N_PARAMS = len(PARAM_NAMES)
+
+_BUMPS_PER_COLUMN = 3
 
 
 def theta_to_params(theta: np.ndarray) -> dict[str, float]:
@@ -89,47 +110,55 @@ class ZGenerator:
     def __init__(self, D: int, cfg: ZConfig):
         self.D, self.cfg = D, cfg
         q = cfg.rank
-        self.freqs = np.fft.rfftfreq(D)
-        F = self.freqs.size
+        freqs = np.fft.rfftfreq(D)
+        with np.errstate(divide="ignore"):
+            self.logf = np.log(np.where(freqs > 0, freqs, 1.0))
         self.spectra: dict[str, np.ndarray] = {}
-        self.warp_disp: dict[str, np.ndarray] = {}
+        self.centers: dict[str, np.ndarray] = {}
+        self.beta_off: dict[str, np.ndarray] = {}
+        self.width_off: dict[str, np.ndarray] = {}
         for role in ("u", "v"):
-            rng = np.random.default_rng([cfg.seed, ord(role), 0])
-            self.spectra[role] = (rng.standard_normal((q, F))
-                                  + 1j * rng.standard_normal((q, F)))
-            wrng = np.random.default_rng([cfg.seed, ord(role), 1])
-            wspec = (wrng.standard_normal((q, F))
-                     + 1j * wrng.standard_normal((q, F)))
-            with np.errstate(divide="ignore"):
-                wscale = np.where(self.freqs > 0, self.freqs ** -1.25, 0.0)
-            disp = np.fft.irfft(wspec * wscale, n=D, axis=1)
-            disp /= np.abs(disp).max(axis=1, keepdims=True) + 1e-12
-            self.warp_disp[role] = disp
+            rng = np.random.default_rng([cfg.seed, ord(role)])
+            self.spectra[role] = (rng.standard_normal((q, freqs.size))
+                                  + 1j * rng.standard_normal((q, freqs.size)))
+            self.spectra[role][:, 0] = 0.0
+            self.centers[role] = rng.uniform(0, D, size=(q, _BUMPS_PER_COLUMN))
+            self.beta_off[role] = rng.uniform(-1, 1, size=q)
+            self.width_off[role] = rng.uniform(-1, 1, size=q)
 
-    def _columns(self, role: str, beta: float, warp: float,
-                 ridge_amount: float, ridge_sharp: float, env_mix: float,
+    def _columns(self, role: str, params: dict[str, float],
                  envelopes: np.ndarray | None) -> np.ndarray:
         D, q = self.D, self.cfg.rank
-        with np.errstate(divide="ignore"):
-            scale = np.where(self.freqs > 0, self.freqs ** (-beta / 2.0), 0.0)
-        cols = np.fft.irfft(self.spectra[role] * scale, n=D, axis=1)  # (q, D)
+        p = params
+
+        beta = np.clip(p[f"beta_{role}"] + p["beta_spread"] * self.beta_off[role],
+                       0.05, 4.0)
+        power = np.exp(-0.5 * beta[:, None] * self.logf[None, :])
+        power[:, 0] = 0.0
+        cols = np.fft.irfft(self.spectra[role] * power, n=D, axis=1)  # (q, D)
         sd = cols.std(axis=1, keepdims=True)
         cols /= np.where(sd > 0, sd, 1.0)
 
-        if warp > 0:
-            pos = np.clip(np.arange(D) + warp * 0.05 * D * self.warp_disp[role],
-                          0, D - 1)
-            i0 = pos.astype(np.int64)
-            i1 = np.minimum(i0 + 1, D - 1)
-            frac = pos - i0
-            rows = np.arange(q)[:, None]
-            cols = cols[rows, i0] * (1.0 - frac) + cols[rows, i1] * frac
+        loc = p["locality"]
+        if loc > 0:
+            sigma = D * 10.0 ** (p["log_width"]
+                                 + p["width_spread"] * self.width_off[role])
+            t = np.arange(D)
+            bump = np.zeros((q, D))
+            for b in range(_BUMPS_PER_COLUMN):
+                d = t[None, :] - self.centers[role][:, b:b + 1]
+                bump += np.exp(-0.5 * (d / sigma[:, None]) ** 2)
+            bump /= bump.max(axis=1, keepdims=True) + 1e-12
+            cols = cols * ((1.0 - loc) + loc * bump)
 
-        cols = (1.0 - ridge_amount) * cols + ridge_amount * np.tanh(ridge_sharp * cols)
+        r = p["ridge_amount"]
+        if r > 0:
+            cols = (1.0 - r) * cols + r * np.tanh(p["ridge_sharp"] * cols)
 
-        if envelopes is not None and env_mix > 0:
+        m = p[f"env_mix_{role}"]
+        if envelopes is not None and m > 0:
             env = envelopes[:, np.arange(q) % envelopes.shape[1]].T  # (q, D)
-            cols = cols * (1.0 - env_mix + env_mix * env)
+            cols = cols * (1.0 - m + m * env)
 
         sd = cols.std(axis=1, keepdims=True)
         cols /= np.where(sd > 0, sd, 1.0)
@@ -138,12 +167,8 @@ class ZGenerator:
     def __call__(self, params: dict[str, float],
                  envelopes: np.ndarray | None = None,
                  project_perp=None) -> ZFactors:
-        U = self._columns("u", params["beta_u"], params["warp_u"],
-                          params["ridge_amount"], params["ridge_sharp"],
-                          params["env_mix_u"], envelopes)
-        V = self._columns("v", params["beta_v"], params["warp_v"],
-                          params["ridge_amount"], params["ridge_sharp"],
-                          params["env_mix_v"], envelopes)
+        U = self._columns("u", params, envelopes)
+        V = self._columns("v", params, envelopes)
         Vp = project_perp(V) if project_perp is not None else V
         scale = 10.0 ** params["log_amp"] / np.sqrt(self.D * self.cfg.rank)
         return ZFactors(U=U, Vp=Vp, scale=scale)
@@ -155,7 +180,7 @@ _GENERATOR_CACHE: dict[tuple[int, int, int], ZGenerator] = {}
 def get_generator(D: int, cfg: ZConfig) -> ZGenerator:
     key = (D, cfg.seed, cfg.rank)
     if key not in _GENERATOR_CACHE:
-        _GENERATOR_CACHE.clear()  # keep at most one; they are ~100 MB each
+        _GENERATOR_CACHE.clear()  # keep at most one; they can be large
         _GENERATOR_CACHE[key] = ZGenerator(D, cfg)
     return _GENERATOR_CACHE[key]
 

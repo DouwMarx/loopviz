@@ -22,10 +22,10 @@ import numpy as np
 from . import bt
 from .config import AudioConfig, OptConfig, Paths, RenderConfig, ZConfig
 from .ingest import (build_song_matrix, download, load_matrix, read_titles,
-                     save_matrix)
-from .loss import (DEFAULT_SCHEDULE, equal_weights, loss_vector, metric_mask,
-                   sample_weights, scalar_loss)
-from .metrics import METRIC_NAMES, features
+                     save_matrix, song_durations, window_seconds)
+from .loss import (DEFAULT_SCHEDULE, equal_weights, loss_vector,
+                   loss_vector_from_phi_dict, sample_weights, scalar_loss)
+from .metrics import METRIC_NAMES, N_METRICS, features
 from .operator import PlaylistOperator
 from .optimize import make_objective, run_es
 from .render import render, save_png
@@ -61,16 +61,23 @@ def cmd_download(args) -> None:
 
 def cmd_build(args) -> None:
     paths = _paths(args)
-    cfg = AudioConfig(sample_rate=args.sample_rate,
-                      excerpt_seconds=args.seconds)
     wavs = sorted(paths.audio.glob("[0-9][0-9][0-9].wav"))
     if len(wavs) < 2:
         raise SystemExit(f"need at least 2 wavs in {paths.audio}")
+    if args.seconds is not None:
+        seconds, stretch = args.seconds, False
+    else:
+        seconds, stretch = window_seconds(args.length_policy,
+                                          song_durations(wavs))
+    cfg = AudioConfig(sample_rate=args.sample_rate, excerpt_seconds=seconds,
+                      stretch=stretch)
     print(f"building X from {len(wavs)} songs "
-          f"(D = {cfg.dim}, {cfg.excerpt_seconds}s @ {cfg.sample_rate} Hz)")
+          f"({args.length_policy}, D = {cfg.dim}, "
+          f"{cfg.excerpt_seconds:.1f}s @ {cfg.sample_rate} Hz)")
     X = build_song_matrix(wavs, cfg)
     titles = read_titles(paths.audio, wavs)
-    save_matrix(X, titles, paths.data / "songs.npz", cfg)
+    save_matrix(X, titles, paths.data / "songs.npz", cfg,
+                length_policy=args.length_policy)
 
     op = PlaylistOperator.from_songs(X)
     err = op.playback_error()
@@ -83,14 +90,13 @@ def cmd_build(args) -> None:
 
 def _save_candidate(paths: Paths, cand_id: str, w: np.ndarray, alpha,
                     theta: np.ndarray, phi: np.ndarray, loss_eq: float,
-                    img_presentation: np.ndarray, gray: bool,
+                    img_presentation: np.ndarray,
                     z_rank: int, es_seed: int) -> None:
     d = paths.runs / cand_id
     d.mkdir(parents=True, exist_ok=True)
     save_png(img_presentation, d / "presentation.png")
     (d / "candidate.json").write_text(json.dumps({
         "id": cand_id,
-        "mode": "gray" if gray else "color",
         "z_rank": z_rank,
         "es_seed": es_seed,
         "alpha": None if alpha is None else (None if np.isinf(alpha) else alpha),
@@ -104,21 +110,24 @@ def _save_candidate(paths: Paths, cand_id: str, w: np.ndarray, alpha,
 
 def _optimize_one(op: PlaylistOperator, w: np.ndarray, alpha, cand_id: str,
                   paths: Paths, zcfg: ZConfig, rcfg: RenderConfig,
-                  ocfg: OptConfig, gray: bool, verbose: bool = True) -> float:
-    objective = make_objective(op, w, zcfg, rcfg.opt_resolution, gray=gray)
+                  ocfg: OptConfig, scalarization: str = "sum",
+                  verbose: bool = True) -> float:
+    objective = make_objective(op, w, zcfg, rcfg.opt_resolution,
+                               stride=rcfg.opt_stride,
+                               scalarization=scalarization)
     progress = (lambda g, l: print(f"  gen {g:2d}  loss {l:.3f}")) if verbose else None
     best, hist = run_es(objective, ocfg, progress=progress)
 
-    # re-render the winner at presentation resolution and re-measure there
+    # re-render the winner at presentation resolution (exact, stride 1)
     params = theta_to_params(best.theta)
     env = song_envelopes(op.X)
     zf = generate_Z(params, op.D, zcfg, envelopes=env, project_perp=op.project_perp)
     L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
-    img = render(L, R, min(rcfg.presentation_resolution, op.D), params, gray=gray)
+    img = render(L, R, min(rcfg.presentation_resolution, op.D), params)
     phi = features(img)
-    loss_eq = scalar_loss(phi, equal_weights(metric_mask(gray)))
+    loss_eq = scalar_loss(phi, equal_weights())
     _save_candidate(paths, cand_id, w, alpha, best.theta, phi, loss_eq, img,
-                    gray, zcfg.rank, ocfg.seed)
+                    zcfg.rank, ocfg.seed)
 
     # invariant: aesthetics never touched playback
     err = op.playback_error(U=zf.U, Vp=zf.Vp, scale=zf.scale)
@@ -136,7 +145,8 @@ def _run_job(job: dict) -> tuple[str, float]:
     ocfg = OptConfig(generations=job["generations"], population=job["population"],
                      seed=job["es_seed"])
     loss_eq = _optimize_one(op, np.asarray(job["w"]), job["alpha"], job["id"],
-                            paths, zcfg, rcfg, ocfg, job["gray"],
+                            paths, zcfg, rcfg, ocfg,
+                            scalarization=job["scalarization"],
                             verbose=job["verbose"])
     return job["id"], loss_eq
 
@@ -144,22 +154,23 @@ def _run_job(job: dict) -> tuple[str, float]:
 def cmd_optimize(args) -> None:
     paths = _paths(args)
     _load_operator(paths)  # fail fast with a clear message
-    gray = not args.color
-    mask = metric_mask(gray)
     rng = np.random.default_rng(args.seed)
 
     draws: list[tuple[str, np.ndarray, object]] = []
     if args.weights:
         w = np.asarray(json.loads(Path(args.weights).read_text())["w_simplex"])
+        if w.size != N_METRICS:
+            raise SystemExit(f"weights file has {w.size} entries, expected "
+                             f"{N_METRICS}: re-run `playlistviz fit`")
         draws.append(("fitted", w, None))
     elif args.baseline:
-        draws.append(("baseline_eq", equal_weights(mask), float("inf")))
+        draws.append(("baseline_eq", equal_weights(), float("inf")))
     else:  # full schedule
         for alpha, n_runs in DEFAULT_SCHEDULE:
             for r in range(n_runs):
                 tag = "inf" if np.isinf(alpha) else f"{alpha:g}"
                 cand_id = f"a{tag}_r{r}" if not np.isinf(alpha) else "baseline_eq"
-                draws.append((cand_id, sample_weights(alpha, rng, mask), alpha))
+                draws.append((cand_id, sample_weights(alpha, rng), alpha))
 
     # replicate each weight draw across ES seeds so a preference for a
     # candidate can be attributed to its weights, not one lucky basin
@@ -170,14 +181,14 @@ def cmd_optimize(args) -> None:
             jobs.append({
                 "id": full_id, "w": list(map(float, w)), "alpha": alpha,
                 "es_seed": args.seed + 1000 * idx + 101 * rep,
-                "gray": gray, "z_rank": args.z_rank, "root": str(paths.root),
+                "z_rank": args.z_rank, "root": str(paths.root),
                 "generations": args.generations, "population": args.population,
+                "scalarization": args.scalarization,
                 "verbose": args.jobs == 1,
             })
 
-    mode = "grayscale" if gray else "color"
-    print(f"{len(jobs)} ES runs ({mode}, Z rank {args.z_rank}, "
-          f"{args.jobs} parallel jobs)")
+    print(f"{len(jobs)} ES runs (Z rank {args.z_rank}, "
+          f"{args.scalarization} scalarization, {args.jobs} parallel jobs)")
 
     if args.jobs > 1:
         import concurrent.futures as cf
@@ -205,7 +216,7 @@ def cmd_render(args) -> None:
     L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
     P = min(args.resolution, op.D)
     print(f"rendering {args.candidate} at {P}x{P}, {args.bits}-bit...")
-    img = render(L, R, P, params, gray=cand.get("mode") == "gray")
+    img = render(L, R, P, params)
     out = paths.runs / args.candidate / f"print_{P}.png"
     save_png(img, out, bit_depth=args.bits)
     print(f"wrote {out}")
@@ -222,19 +233,15 @@ def cmd_fit(args) -> None:
     comps = bt.load_comparisons(paths.comparisons)
     if not comps:
         raise SystemExit("no comparisons recorded - run `playlistviz compare` first")
+    # loss vectors are rebuilt from stored phi (by metric name) so candidates
+    # saved under older metric sets stay usable
     loss_vectors = {}
-    modes = set()
     for f in sorted(paths.runs.glob("*/candidate.json")):
         if f.parent.name.startswith("exp_"):
             continue
         d = json.loads(f.read_text())
-        loss_vectors[d["id"]] = np.asarray(d["loss_vector"])
-        modes.add(d.get("mode", "color"))
-    active = None
-    if modes == {"gray"}:
-        active = metric_mask(gray=True)
-        print("grayscale pool: color metrics excluded from the fit\n")
-    fit = bt.fit_bt(comps, loss_vectors, l2=args.l2, active=active)
+        loss_vectors[d["id"]] = loss_vector_from_phi_dict(d["phi"])
+    fit = bt.fit_bt(comps, loss_vectors, l2=args.l2)
     se = fit.std_errors()
 
     print(f"Bradley-Terry fit on {fit.n_comparisons} comparisons "
@@ -269,15 +276,15 @@ def cmd_report(args) -> None:
     if not cands:
         raise SystemExit("no candidates yet")
     cands.sort(key=lambda d: d["loss_eq"])
-    print(f"{'candidate':20s} {'mode':>5s} {'alpha':>6s} {'L_eq':>8s}   top weighted metrics")
+    print(f"{'candidate':20s} {'alpha':>6s} {'L_eq':>8s}   top weighted metrics")
     for d in cands:
         w = np.asarray(d["weights"])
         top = np.argsort(-w)[:3]
-        tops = ", ".join(f"{METRIC_NAMES[i]}={w[i]:.2f}" for i in top)
+        names = d.get("metric_names", METRIC_NAMES[:len(w)])
+        tops = ", ".join(f"{names[i]}={w[i]:.2f}" for i in top if i < len(names))
         alpha = d.get("alpha")
         alpha_s = "eq" if alpha is None else f"{alpha:g}"
-        print(f"{d['id']:20s} {d.get('mode', '?'):>5s} {alpha_s:>6s} "
-              f"{d['loss_eq']:8.3f}   {tops}")
+        print(f"{d['id']:20s} {alpha_s:>6s} {d['loss_eq']:8.3f}   {tops}")
 
 
 # -- entry point ---------------------------------------------------------------
@@ -294,20 +301,19 @@ def main(argv=None) -> None:
     p.set_defaults(fn=cmd_download)
 
     p = sub.add_parser("build", help="build song matrix X and verify the operator")
-    p.add_argument("--sample-rate", type=int, default=8000,
+    p.add_argument("--sample-rate", type=int, default=1000,
                    help="Hz; the operator is exact at any rate, this only "
-                        "sets playback fidelity (default 8000)")
-    p.add_argument("--seconds", type=float, default=12.0,
-                   help="excerpt length per song (center-cropped; shorter "
-                        "songs are zero-padded)")
+                        "sets playback fidelity (default 1000 while iterating)")
+    p.add_argument("--length-policy", default="pad-longest",
+                   choices=("crop-shortest", "pad-longest", "stretch"),
+                   help="how songs of different lengths become one matrix")
+    p.add_argument("--seconds", type=float, default=None,
+                   help="override: fixed window in seconds (center-crop/pad)")
     p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("optimize", help="ES-optimize the free part of A")
     p.add_argument("--baseline", action="store_true", help="equal weights only")
     p.add_argument("--weights", help="fitted_weights.json to optimize under")
-    p.add_argument("--color", action="store_true",
-                   help="optimize in color (default: grayscale, color "
-                        "metrics excluded)")
     p.add_argument("--replicates", type=int, default=1,
                    help="ES runs per weight draw (different seeds), to "
                         "separate weight effects from basin luck")
@@ -315,6 +321,10 @@ def main(argv=None) -> None:
                    help="parallel worker processes")
     p.add_argument("--z-rank", type=int, default=ZConfig().rank,
                    help="rank of the free part Z (texture richness vs cost)")
+    p.add_argument("--scalarization", default="sum",
+                   choices=("sum", "chebyshev"),
+                   help="weighted sum, or augmented Chebyshev (reaches "
+                        "non-convex Pareto points)")
     p.add_argument("--generations", type=int, default=14)
     p.add_argument("--population", type=int, default=12)
     p.add_argument("--seed", type=int, default=0)

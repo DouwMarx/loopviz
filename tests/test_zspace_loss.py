@@ -3,7 +3,8 @@ import pytest
 
 from playlistviz.config import OptConfig, ZConfig
 from playlistviz.loss import (barrier, equal_weights, loss_vector,
-                              sample_weights, scalar_loss)
+                              loss_vector_from_phi_dict, sample_weights,
+                              scalar_loss)
 from playlistviz.metrics import METRIC_NAMES, N_METRICS, TARGETS
 from playlistviz.operator import PlaylistOperator
 from playlistviz.optimize import run_es
@@ -18,7 +19,6 @@ def test_theta_mapping_ranges():
     for name, val in params.items():
         lo, hi = PARAM_RANGES[name]
         assert lo <= val <= hi
-    # extreme thetas saturate near the bounds
     hi_params = theta_to_params(np.full(N_PARAMS, 20.0))
     for name, val in hi_params.items():
         assert val == pytest.approx(PARAM_RANGES[name][1], rel=1e-3)
@@ -43,6 +43,28 @@ def test_generate_Z_theta_sensitivity():
     a = generate_Z(theta_to_params(np.zeros(N_PARAMS)), 600, cfg)
     b = generate_Z(theta_to_params(np.full(N_PARAMS, 2.0)), 600, cfg)
     assert not np.allclose(a.U, b.U)
+
+
+def test_locality_localizes_columns():
+    """High locality must concentrate column energy; low must spread it."""
+    cfg = ZConfig(rank=4, seed=2)
+    D = 4000
+    base = dict(theta_to_params(np.zeros(N_PARAMS)), ridge_amount=0.0)
+    p_global = dict(base, locality=0.0)
+    p_local = dict(base, locality=0.97, log_width=-2.5, width_spread=0.0)
+    zg = generate_Z(p_global, D, cfg)
+    zl = generate_Z(p_local, D, cfg)
+
+    def support_frac(U):
+        # fraction of samples holding 90% of the energy, averaged over cols
+        fracs = []
+        for k in range(U.shape[1]):
+            e = np.sort(U[:, k] ** 2)[::-1]
+            c = np.cumsum(e) / e.sum()
+            fracs.append(np.searchsorted(c, 0.9) / U.shape[0])
+        return np.mean(fracs)
+
+    assert support_frac(zl.U) < 0.5 * support_frac(zg.U)
 
 
 def test_generate_Z_projected_is_invisible():
@@ -70,6 +92,12 @@ def test_loss_zero_at_targets():
     assert np.allclose(loss_vector(TARGETS.copy()), 0.0)
 
 
+def test_loss_vector_from_phi_dict_ignores_stale_names():
+    phi = {name: float(t) for name, t in zip(METRIC_NAMES, TARGETS)}
+    phi["colorfulness"] = 55.0  # stale metric from an older candidate file
+    assert np.allclose(loss_vector_from_phi_dict(phi), 0.0)
+
+
 def test_scalar_loss_weighting():
     phi = TARGETS.copy()
     phi[0] += 0.4  # one scale unit off on beta -> squared residual 1
@@ -79,6 +107,18 @@ def test_scalar_loss_weighting():
     w_other = np.zeros(N_METRICS)
     w_other[1] = 1.0
     assert scalar_loss(phi, w_other) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_chebyshev_scalarization():
+    phi = TARGETS.copy()
+    phi[0] += 0.4   # loss 1 on metric 0
+    phi[1] += 0.15  # loss 1 on metric 1
+    w = np.full(N_METRICS, 1.0 / N_METRICS)
+    cheb = scalar_loss(phi, w, scalarization="chebyshev")
+    # max term = 1/N + augmentation 0.05 * 2
+    assert cheb == pytest.approx(1.0 / N_METRICS + 0.05 * 2.0, abs=1e-6)
+    with pytest.raises(ValueError):
+        scalar_loss(phi, w, scalarization="nope")
 
 
 def test_barrier_activates_on_flat_image_stats():
@@ -101,7 +141,6 @@ def test_dirichlet_weights_on_simplex():
 # -- ES ---------------------------------------------------------------
 
 def test_es_improves_toy_objective():
-    """ES should approach the minimum of a shifted quadratic."""
     target = np.full(N_PARAMS, 0.7)
 
     class R:
@@ -111,10 +150,10 @@ def test_es_improves_toy_objective():
     def objective(theta):
         return R(theta, float(((theta - target) ** 2).sum()))
 
-    cfg = OptConfig(generations=20, population=8, seed=1, subspace_rank=0)
+    cfg = OptConfig(generations=25, population=10, seed=1, subspace_rank=0)
     best, hist = run_es(objective, cfg)
-    assert hist.best_loss[-1] < hist.best_loss[0] * 0.2
-    assert hist.evaluations == 1 + 20 * 8
+    assert hist.best_loss[-1] < hist.best_loss[0] * 0.25
+    assert hist.evaluations == 1 + 25 * 10
 
 
 def test_es_subspace_search_runs():

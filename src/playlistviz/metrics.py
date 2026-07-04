@@ -1,9 +1,10 @@
-"""Aesthetic feature map phi: RGB image -> R^14.
+"""Aesthetic feature map phi: grayscale image -> R^11.
 
-Ten metrics from the aesthetic-optimization spec plus four literature-backed
-additions (edge-orientation entropy, compression complexity, luminance
-skewness, center-of-mass balance). Each metric has a population target t and
-a normalization scale s; per-metric loss is ((phi - t)/s)^2.
+Seven structural metrics from the aesthetic-optimization spec plus four
+literature-backed additions (edge-orientation entropy, compression
+complexity, luminance skewness, center-of-mass balance). Color metrics were
+removed with color rendering. Each metric has a population target t and a
+normalization scale s; per-metric loss is ((phi - t)/s)^2.
 
 Measurement is two-scale (image and its 2x block-downsample averaged) to
 penalize scale-fragile solutions, as in the spec.
@@ -28,15 +29,11 @@ class MetricSpec:
 METRICS: list[MetricSpec] = [
     MetricSpec("beta_slope", 2.0, 0.4, "natural-scene 1/f^2 statistics"),
     MetricSpec("fractal_dim", 1.4, 0.15, "Taylor/Spehar preferred D ~ 1.3-1.5"),
-    MetricSpec("colorfulness", 55.0, 20.0, "Hasler-Suesstrunk M"),
-    MetricSpec("hue_dispersion", 0.4, 0.3, "analogous palettes over uniform scatter"),
     MetricSpec("entropy", 5.0, 1.2, "Berlyne inverted-U mid complexity"),
     MetricSpec("edge_density", 0.08, 0.05, "visual clutter penalty"),
     MetricSpec("gradient_gini", 0.75, 0.12, "sparse coding / processing fluency"),
     MetricSpec("symmetry", 0.30, 0.30, "mild mirror symmetry preferred"),
     MetricSpec("rms_contrast", 0.20, 0.07, "anti-washout"),
-    MetricSpec("mean_saturation", 0.45, 0.18, "moderate saturation"),
-    # additions from the literature review
     MetricSpec("edge_orient_entropy", 0.95, 0.10, "Redies 2017: art near max EOE"),
     MetricSpec("compress_complexity", 0.50, 0.20, "Forsythe 2011 inverted-U midpoint"),
     MetricSpec("lum_skewness", 0.0, 0.6, "Graham/Redies: art has ~0 luminance skew"),
@@ -51,10 +48,6 @@ N_METRICS = len(METRICS)
 
 # -- helpers ------------------------------------------------------------------
 
-def luminance(img: np.ndarray) -> np.ndarray:
-    return 0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]
-
-
 def _gradients(L: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     gy, gx = np.gradient(L)
     return gx, gy
@@ -65,29 +58,10 @@ def _grad_mag(L: np.ndarray) -> np.ndarray:
     return np.hypot(gx, gy)
 
 
-def _rgb_to_hsv_sv(img: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return (hue in [0,1), saturation) without a colorsys loop."""
-    mx = img.max(axis=-1)
-    mn = img.min(axis=-1)
-    diff = mx - mn
-    s = np.where(mx > 1e-12, diff / np.maximum(mx, 1e-12), 0.0)
-    r, g, b = img[..., 0], img[..., 1], img[..., 2]
-    h = np.zeros_like(mx)
-    safe = diff > 1e-12
-    d = np.where(safe, diff, 1.0)
-    h = np.where(safe & (mx == r), ((g - b) / d) % 6, h)
-    h = np.where(safe & (mx == g), (b - r) / d + 2, h)
-    h = np.where(safe & (mx == b), (r - g) / d + 4, h)
-    return h / 6.0, s
-
-
-def downsample2(img: np.ndarray) -> np.ndarray:
-    """2x block-mean downsample of an (H, W, C) or (H, W) image."""
-    h, w = img.shape[0] // 2 * 2, img.shape[1] // 2 * 2
-    im = img[:h, :w]
-    if im.ndim == 3:
-        return im.reshape(h // 2, 2, w // 2, 2, -1).mean(axis=(1, 3))
-    return im.reshape(h // 2, 2, w // 2, 2).mean(axis=(1, 3))
+def downsample2(L: np.ndarray) -> np.ndarray:
+    """2x block-mean downsample of an (H, W) image."""
+    h, w = L.shape[0] // 2 * 2, L.shape[1] // 2 * 2
+    return L[:h, :w].reshape(h // 2, 2, w // 2, 2).mean(axis=(1, 3))
 
 
 # -- individual metrics ---------------------------------------------------------
@@ -135,27 +109,6 @@ def fractal_dim(L: np.ndarray) -> float:
     return float(-slope)
 
 
-def colorfulness(img: np.ndarray) -> float:
-    """Hasler-Suesstrunk M on 0-255 scale."""
-    r, g, b = img[..., 0] * 255, img[..., 1] * 255, img[..., 2] * 255
-    rg = r - g
-    yb = 0.5 * (r + g) - b
-    return float(np.hypot(rg.std(), yb.std()) + 0.3 * np.hypot(rg.mean(), yb.mean()))
-
-
-def hue_dispersion(img: np.ndarray) -> float:
-    """Saturation-weighted circular std of hue, in radians-ish [0, ~1.5]."""
-    h, s = _rgb_to_hsv_sv(img)
-    w = s.ravel()
-    if w.sum() < 1e-9:
-        return 0.0
-    ang = 2 * np.pi * h.ravel()
-    C = np.average(np.cos(ang), weights=w)
-    S = np.average(np.sin(ang), weights=w)
-    Rbar = np.hypot(C, S)
-    return float(min(np.sqrt(max(-2.0 * np.log(max(Rbar, 1e-12)), 0.0)), 3.0))
-
-
 def entropy(L: np.ndarray) -> float:
     """Shannon entropy (bits) of the 256-bin luminance histogram."""
     hist, _ = np.histogram(np.clip(L, 0, 1), bins=256, range=(0, 1))
@@ -190,11 +143,6 @@ def symmetry(L: np.ndarray) -> float:
 
 def rms_contrast(L: np.ndarray) -> float:
     return float(L.std())
-
-
-def mean_saturation(img: np.ndarray) -> float:
-    _, s = _rgb_to_hsv_sv(img)
-    return float(s.mean())
 
 
 def edge_orient_entropy(L: np.ndarray, bins: int = 24, top_n: int = 10000) -> float:
@@ -243,20 +191,16 @@ def balance_dcm(L: np.ndarray) -> float:
 
 # -- feature map ---------------------------------------------------------------
 
-def features_single(img: np.ndarray) -> np.ndarray:
-    """phi on one image, order matches METRICS."""
-    L = luminance(img)
+def features_single(L: np.ndarray) -> np.ndarray:
+    """phi on one 2D grayscale image, order matches METRICS."""
     return np.array([
         beta_slope(L),
         fractal_dim(L),
-        colorfulness(img),
-        hue_dispersion(img),
         entropy(L),
         edge_density(L),
         gradient_gini(L),
         symmetry(L),
         rms_contrast(L),
-        mean_saturation(img),
         edge_orient_entropy(L),
         compress_complexity(L),
         lum_skewness(L),
@@ -264,9 +208,9 @@ def features_single(img: np.ndarray) -> np.ndarray:
     ])
 
 
-def features(img: np.ndarray, two_scale: bool = True) -> np.ndarray:
+def features(L: np.ndarray, two_scale: bool = True) -> np.ndarray:
     """Two-scale phi: average over the image and its 2x downsample."""
-    phi = features_single(img)
-    if two_scale and min(img.shape[:2]) >= 128:
-        phi = 0.5 * (phi + features_single(downsample2(img)))
+    phi = features_single(L)
+    if two_scale and min(L.shape) >= 128:
+        phi = 0.5 * (phi + features_single(downsample2(L)))
     return phi

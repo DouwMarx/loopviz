@@ -1,6 +1,10 @@
 """Scalarized aesthetic loss, barriers, and weight sampling.
 
-L_w(theta) = sum_i w_i * ((phi_i - t_i)/s_i)^2 + barrier(phi)
+L_w(theta) = sum_i w_i * ((phi_i - t_i)/s_i)^2 + barrier(phi)          (sum)
+L_w(theta) = max_i w_i * l_i + 0.05 * sum_i l_i + barrier(phi)   (chebyshev)
+
+The augmented weighted-Chebyshev form reaches non-convex parts of the Pareto
+front that weighted sums cannot (standard multi-criteria result).
 
 Barriers are weight-independent guards against reward hacking (near-flat
 images gaming single metrics), per the spec's empirical findings.
@@ -20,8 +24,16 @@ def loss_vector(phi: np.ndarray) -> np.ndarray:
     return ((phi - TARGETS) / SCALES) ** 2
 
 
+def loss_vector_from_phi_dict(phi: dict[str, float]) -> np.ndarray:
+    """Loss vector from a stored phi dict (by name), tolerant of candidates
+    saved under older metric sets (extra names ignored, all current names
+    required)."""
+    values = np.array([phi[name] for name in METRIC_NAMES])
+    return loss_vector(values)
+
+
 def barrier(phi: np.ndarray) -> float:
-    """Quadratic penalties outside hard perceptual floors/ceilings."""
+    """Quadratic penalties outside hard perceptual floors."""
     pen = 0.0
     contrast = phi[_IDX["rms_contrast"]]
     if contrast < 0.10:
@@ -29,51 +41,30 @@ def barrier(phi: np.ndarray) -> float:
     ent = phi[_IDX["entropy"]]
     if ent < 3.0:
         pen += (10.0 * (3.0 - ent)) ** 2
-    cf = phi[_IDX["colorfulness"]]
-    if cf > 95.0:
-        pen += (0.5 * (cf - 95.0)) ** 2
     return float(pen)
 
 
-def scalar_loss(phi: np.ndarray, w: np.ndarray) -> float:
-    return float(w @ loss_vector(phi) + barrier(phi))
+def scalar_loss(phi: np.ndarray, w: np.ndarray,
+                scalarization: str = "sum") -> float:
+    lv = loss_vector(phi)
+    if scalarization == "sum":
+        core = float(w @ lv)
+    elif scalarization == "chebyshev":
+        core = float(np.max(w * lv) + 0.05 * lv.sum())
+    else:
+        raise ValueError(f"unknown scalarization {scalarization!r}")
+    return core + barrier(phi)
 
 
-# metrics that are meaningful on a grayscale image (color metrics excluded:
-# colorfulness, hue_dispersion, mean_saturation)
-GRAY_METRICS = [n for n in METRIC_NAMES
-                if n not in ("colorfulness", "hue_dispersion", "mean_saturation")]
-GRAY_IDX = np.array([_IDX[n] for n in GRAY_METRICS])
+def equal_weights() -> np.ndarray:
+    return np.full(N_METRICS, 1.0 / N_METRICS)
 
 
-def metric_mask(gray: bool) -> np.ndarray:
-    """Boolean mask of active metrics for the given mode."""
-    mask = np.ones(N_METRICS, dtype=bool)
-    if gray:
-        mask[:] = False
-        mask[GRAY_IDX] = True
-    return mask
-
-
-def equal_weights(mask: np.ndarray | None = None) -> np.ndarray:
-    """Uniform weights over active metrics (zeros elsewhere), summing to 1."""
-    if mask is None:
-        return np.full(N_METRICS, 1.0 / N_METRICS)
-    w = np.zeros(N_METRICS)
-    w[mask] = 1.0 / mask.sum()
-    return w
-
-
-def sample_weights(alpha: float, rng: np.random.Generator,
-                   mask: np.ndarray | None = None) -> np.ndarray:
-    """Dirichlet(alpha * 1) draw on the (masked) simplex; alpha=inf -> equal."""
+def sample_weights(alpha: float, rng: np.random.Generator) -> np.ndarray:
+    """Dirichlet(alpha * 1) draw on the simplex; alpha=inf -> equal weights."""
     if not np.isfinite(alpha):
-        return equal_weights(mask)
-    if mask is None:
-        return rng.dirichlet(np.full(N_METRICS, alpha))
-    w = np.zeros(N_METRICS)
-    w[mask] = rng.dirichlet(np.full(int(mask.sum()), alpha))
-    return w
+        return equal_weights()
+    return rng.dirichlet(np.full(N_METRICS, alpha))
 
 
 # The Dirichlet annealing schedule from the spec: (alpha, number of runs)

@@ -55,7 +55,12 @@ def download(links: list[str], out_dir: Path, sample_rate: int) -> list[Path]:
 
 
 def load_excerpt(path: Path, cfg: AudioConfig) -> np.ndarray:
-    """Load a wav, mixdown to mono, resample if needed, center-crop/pad to D."""
+    """Load a wav, mixdown to mono, resample, then make length uniform.
+
+    Length policy: with cfg.stretch, the song is time-stretched (resampled)
+    to exactly D samples; otherwise it is center-cropped if longer than D
+    and zero-padded at the end if shorter.
+    """
     data, sr = sf.read(str(path), dtype="float64")
     if data.ndim == 2:
         data = data.mean(axis=1)
@@ -65,7 +70,10 @@ def load_excerpt(path: Path, cfg: AudioConfig) -> np.ndarray:
         g = gcd(sr, cfg.sample_rate)
         data = resample_poly(data, cfg.sample_rate // g, sr // g)
     D = cfg.dim
-    if data.size >= D:
+    if cfg.stretch and data.size != D:
+        from scipy.signal import resample
+        x = resample(data, D)
+    elif data.size >= D:
         start = (data.size - D) // 2
         x = data[start:start + D]
     else:
@@ -78,19 +86,42 @@ def load_excerpt(path: Path, cfg: AudioConfig) -> np.ndarray:
     return x
 
 
+def song_durations(wav_paths: list[Path]) -> list[float]:
+    """Duration in seconds of each wav."""
+    return [sf.info(str(p)).duration for p in wav_paths]
+
+
+def window_seconds(policy: str, durations: list[float]) -> tuple[float, bool]:
+    """Map a length policy to (window seconds, stretch flag).
+
+    crop-shortest: window = shortest song, longer songs center-cropped
+    pad-longest  : window = longest song, shorter songs zero-padded
+    stretch      : window = longest song, every song time-stretched to fit
+    """
+    if policy == "crop-shortest":
+        return min(durations), False
+    if policy == "pad-longest":
+        return max(durations), False
+    if policy == "stretch":
+        return max(durations), True
+    raise ValueError(f"unknown length policy {policy!r}")
+
+
 def build_song_matrix(wav_paths: list[Path], cfg: AudioConfig) -> np.ndarray:
     """Stack excerpts into X (D, N) in playlist order."""
     cols = [load_excerpt(p, cfg) for p in wav_paths]
     return np.stack(cols, axis=1)
 
 
-def save_matrix(X: np.ndarray, titles: list[str], path: Path, cfg: AudioConfig) -> None:
+def save_matrix(X: np.ndarray, titles: list[str], path: Path, cfg: AudioConfig,
+                length_policy: str = "crop") -> None:
     np.savez_compressed(
         path, X=X.astype(np.float32),
         meta=json.dumps({
             "titles": titles,
             "sample_rate": cfg.sample_rate,
             "excerpt_seconds": cfg.excerpt_seconds,
+            "length_policy": length_policy,
         }),
     )
 

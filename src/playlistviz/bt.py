@@ -74,23 +74,12 @@ def _design_matrix(comparisons: list[Comparison],
 
 
 def fit_bt(comparisons: list[Comparison], loss_vectors: dict[str, np.ndarray],
-           l2: float = 1.0, n_metrics: int = N_METRICS,
-           active: np.ndarray | None = None) -> BTFit:
-    """MAP fit of w. Prior: w ~ Normal(uniform-over-active, 1/(2*l2) I).
-
-    active: boolean mask of metrics to fit; inactive metrics get design
-    column and prior center zero, so their fitted weight is exactly 0
-    (used for grayscale pools where color metrics carry no signal).
-    """
+           l2: float = 1.0, n_metrics: int = N_METRICS) -> BTFit:
+    """MAP fit of w. Prior: w ~ Normal(uniform, 1/(2*l2) I)."""
     if not comparisons:
         raise ValueError("no comparisons to fit")
     X = _design_matrix(comparisons, loss_vectors)  # (C, M); w.X > 0 = correct order
-    if active is not None:
-        X = X * active[None, :]
-        w0 = np.zeros(n_metrics)
-        w0[active] = 1.0 / active.sum()
-    else:
-        w0 = np.full(n_metrics, 1.0 / n_metrics)
+    w0 = np.full(n_metrics, 1.0 / n_metrics)
 
     def nlp(w):
         z = X @ w

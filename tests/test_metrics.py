@@ -4,18 +4,14 @@ import pytest
 from playlistviz import metrics as M
 
 
-def _gray(L):
-    return np.stack([L, L, L], axis=-1)
-
-
 @pytest.fixture
 def rng():
     return np.random.default_rng(0)
 
 
 def test_feature_vector_shape(rng):
-    img = rng.random((128, 128, 3))
-    phi = M.features(img)
+    L = rng.random((128, 128))
+    phi = M.features(L)
     assert phi.shape == (M.N_METRICS,)
     assert np.isfinite(phi).all()
 
@@ -52,17 +48,6 @@ def test_gini_bounds(rng):
     spike = np.zeros((64, 64))
     spike[32, 32] = 1.0
     assert M.gradient_gini(spike) > 0.95
-
-
-def test_colorfulness_gray_zero(rng):
-    assert M.colorfulness(_gray(rng.random((32, 32)))) == pytest.approx(0.0, abs=1e-9)
-
-
-def test_mean_saturation_extremes():
-    red = np.zeros((16, 16, 3))
-    red[..., 0] = 1.0
-    assert M.mean_saturation(red) == pytest.approx(1.0)
-    assert M.mean_saturation(_gray(np.full((16, 16), 0.7))) == pytest.approx(0.0)
 
 
 def test_edge_orient_entropy_extremes(rng):
@@ -102,7 +87,7 @@ def test_fractal_dim_range(rng):
 
 
 def test_two_scale_averaging(rng):
-    img = rng.random((256, 256, 3))
-    phi1 = M.features(img, two_scale=False)
-    phi2 = M.features(img, two_scale=True)
+    L = rng.random((256, 256))
+    phi1 = M.features(L, two_scale=False)
+    phi2 = M.features(L, two_scale=True)
     assert not np.allclose(phi1, phi2)  # downsample changes at least one metric

@@ -86,12 +86,15 @@ class CompareState:
         self._refill()
 
     def _load_loss_vectors(self) -> dict[str, np.ndarray]:
+        from .loss import loss_vector_from_phi_dict
+
         out = {}
         for f in sorted(self.runs_dir.glob("*/candidate.json")):
             if f.parent.name.startswith("exp_"):
                 continue  # experiment outputs are not comparison candidates
             d = json.loads(f.read_text())
-            out[d["id"]] = np.asarray(d["loss_vector"])
+            # rebuilt from phi by name: robust to metric-set changes
+            out[d["id"]] = loss_vector_from_phi_dict(d["phi"])
         return out
 
     def _seen_pairs(self) -> set[frozenset]:

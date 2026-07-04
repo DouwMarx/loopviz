@@ -6,9 +6,17 @@ This shows what the aesthetic stack can reach when the operator does not
 have to reproduce the playlist - the reference point for judging how much
 the music constraint costs visually.
 
-Run: .venv/bin/python scripts/exp_free_aesthetics.py [--color]
+Flags:
+  --negate      sign-flip sanity check: MAXIMIZE the loss. The result should
+                look conspicuously bad; if it doesn't, the metrics are vacuous.
+  --rank Q      Z rank (default 48)
+  --seed S      ES seed (default 7)
+  --tag NAME    output subdirectory suffix
+
+Run: .venv/bin/python scripts/exp_free_aesthetics.py [flags]
 """
 
+import argparse
 import json
 import sys
 import time
@@ -19,47 +27,60 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from playlistviz.config import OptConfig, ZConfig
-from playlistviz.loss import equal_weights, loss_vector, metric_mask, scalar_loss
+from playlistviz.loss import equal_weights, loss_vector, scalar_loss
 from playlistviz.metrics import METRIC_NAMES, features
 from playlistviz.optimize import EvalResult, run_es
 from playlistviz.render import render, save_png
 from playlistviz.zspace import generate_Z, theta_to_params
 
 ROOT = Path(__file__).parent.parent
-OUT = ROOT / "runs" / "exp_free_baseline"
-D = 96000  # same ambient dimension as the real operator
+D = 96000  # ambient dimension; visual character is D-insensitive
 
 
 def main() -> None:
-    gray = "--color" not in sys.argv
-    OUT.mkdir(parents=True, exist_ok=True)
-    zcfg = ZConfig(rank=32)
-    w = equal_weights(metric_mask(gray))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--negate", action="store_true")
+    ap.add_argument("--rank", type=int, default=48)
+    ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--tag", default="")
+    args = ap.parse_args()
+
+    name = "exp_free_negated" if args.negate else "exp_free_baseline"
+    if args.tag:
+        name += f"_{args.tag}"
+    out = ROOT / "runs" / name
+    out.mkdir(parents=True, exist_ok=True)
+
+    zcfg = ZConfig(rank=args.rank)
+    w = equal_weights()
+    sign = -1.0 if args.negate else 1.0
 
     def objective(theta: np.ndarray) -> EvalResult:
         params = theta_to_params(theta)
         zf = generate_Z(params, D, zcfg)  # unprojected: no music constraint
-        img = render(zf.U, zf.Vp, 384, params, gray=gray)
+        img = render(zf.U, zf.Vp, 384, params, stride=4)
         phi = features(img)
-        return EvalResult(theta=theta.copy(), loss=scalar_loss(phi, w), phi=phi)
+        return EvalResult(theta=theta.copy(),
+                          loss=sign * scalar_loss(phi, w), phi=phi)
 
     t0 = time.time()
-    best, hist = run_es(objective, OptConfig(generations=14, population=12, seed=7),
-                        progress=lambda g, l: print(f"  gen {g:2d}  loss {l:.3f}"))
+    best, hist = run_es(
+        objective, OptConfig(generations=14, population=12, seed=args.seed),
+        progress=lambda g, l: print(f"  gen {g:2d}  loss {l:.3f}"))
     print(f"ES finished in {time.time() - t0:.0f}s, "
           f"loss {hist.best_loss[0]:.3f} -> {best.loss:.3f}")
 
     params = theta_to_params(best.theta)
     zf = generate_Z(params, D, zcfg)
-    img = render(zf.U, zf.Vp, 1536, params, gray=gray)
+    img = render(zf.U, zf.Vp, 1536, params)
     phi = features(img)
     loss_eq = scalar_loss(phi, w)
-    save_png(img, OUT / "presentation.png")
-    (OUT / "candidate.json").write_text(json.dumps({
-        "id": "free_baseline",
-        "mode": "gray" if gray else "color",
+    save_png(img, out / "presentation.png")
+    (out / "candidate.json").write_text(json.dumps({
+        "id": name,
         "z_rank": zcfg.rank,
-        "es_seed": 7,
+        "es_seed": args.seed,
+        "negated": args.negate,
         "alpha": None,
         "weights": list(map(float, w)),
         "theta": list(map(float, best.theta)),
@@ -67,8 +88,8 @@ def main() -> None:
         "loss_vector": list(map(float, loss_vector(phi))),
         "loss_eq": float(loss_eq),
     }, indent=2))
-    print(f"unconstrained L_eq = {loss_eq:.3f}  ->  {OUT}/presentation.png")
-    print("(compare against the constrained candidates in `playlistviz report`)")
+    kind = "negated (should look BAD)" if args.negate else "unconstrained"
+    print(f"{kind} L_eq = {loss_eq:.3f}  ->  {out}/presentation.png")
 
 
 if __name__ == "__main__":

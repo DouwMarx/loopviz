@@ -8,13 +8,13 @@ import pytest
 
 from playlistviz import bt
 from playlistviz.compare_server import CompareState
-from playlistviz.config import AudioConfig, OptConfig, RenderConfig, ZConfig
-from playlistviz.ingest import build_song_matrix, load_matrix, save_matrix
+from playlistviz.config import AudioConfig, OptConfig, ZConfig
+from playlistviz.ingest import load_matrix, save_matrix, window_seconds
 from playlistviz.loss import equal_weights, loss_vector, scalar_loss
-from playlistviz.metrics import features
+from playlistviz.metrics import METRIC_NAMES, features
 from playlistviz.operator import PlaylistOperator
 from playlistviz.optimize import make_objective, run_es
-from playlistviz.render import save_png
+from playlistviz.render import render, save_png
 from playlistviz.zspace import (N_PARAMS, generate_Z, song_envelopes,
                                 theta_to_params)
 
@@ -42,10 +42,21 @@ def test_matrix_roundtrip(tmp_path):
     rng = np.random.default_rng(1)
     X = synthetic_songs(rng)
     cfg = AudioConfig()
-    save_matrix(X, ["a", "b", "c", "d", "e"], tmp_path / "songs.npz", cfg)
+    save_matrix(X, ["a", "b", "c", "d", "e"], tmp_path / "songs.npz", cfg,
+                length_policy="pad-longest")
     X2, meta = load_matrix(tmp_path / "songs.npz")
     assert np.allclose(X, X2, atol=1e-6)  # float32 storage
     assert meta["titles"] == ["a", "b", "c", "d", "e"]
+    assert meta["length_policy"] == "pad-longest"
+
+
+def test_window_seconds_policies():
+    durations = [100.0, 200.0, 150.0]
+    assert window_seconds("crop-shortest", durations) == (100.0, False)
+    assert window_seconds("pad-longest", durations) == (200.0, False)
+    assert window_seconds("stretch", durations) == (200.0, True)
+    with pytest.raises(ValueError):
+        window_seconds("nope", durations)
 
 
 def test_objective_runs_and_preserves_playback(op):
@@ -53,7 +64,14 @@ def test_objective_runs_and_preserves_playback(op):
     objective = make_objective(op, w, ZConfig(rank=4), resolution=64)
     res = objective(np.random.default_rng(2).standard_normal(N_PARAMS))
     assert np.isfinite(res.loss)
-    assert res.image.shape == (64, 64, 3)
+    assert res.image.shape == (64, 64)
+
+
+def test_objective_with_stride_runs(op):
+    w = equal_weights()
+    objective = make_objective(op, w, ZConfig(rank=4), resolution=32, stride=4)
+    res = objective(np.zeros(N_PARAMS))
+    assert np.isfinite(res.loss)
 
 
 def test_short_es_run_improves_or_holds(op):
@@ -66,8 +84,8 @@ def test_short_es_run_improves_or_holds(op):
 
 
 def test_candidates_to_bt_fit(tmp_path, op):
-    """Write two candidates the way the CLI does, then drive the compare
-    state machine and fit."""
+    """Write candidates the way the CLI does, then drive the compare state
+    machine and fit."""
     runs = tmp_path / "runs"
     rng = np.random.default_rng(3)
     env = song_envelopes(op.X)
@@ -77,7 +95,6 @@ def test_candidates_to_bt_fit(tmp_path, op):
         zf = generate_Z(params, op.D, ZConfig(rank=4), envelopes=env,
                         project_perp=op.project_perp)
         L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
-        from playlistviz.render import render
         img = render(L, R, 128, params)
         phi = features(img)
         cand_id = f"cand{i}"
@@ -89,7 +106,7 @@ def test_candidates_to_bt_fit(tmp_path, op):
             "alpha": None,
             "weights": list(map(float, equal_weights())),
             "theta": list(map(float, theta)),
-            "phi": {},
+            "phi": {n: float(v) for n, v in zip(METRIC_NAMES, phi)},
             "loss_vector": list(map(float, loss_vector(phi))),
             "loss_eq": float(scalar_loss(phi, equal_weights())),
         }))
@@ -98,7 +115,6 @@ def test_candidates_to_bt_fit(tmp_path, op):
     state = CompareState(runs, comps_path)
     assert len(state.loss_vectors) == 3
 
-    # exhaust all 3 pairs through the state machine
     seen = set()
     for _ in range(3):
         pair = state.next_pair()

@@ -8,8 +8,9 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class AudioConfig:
-    sample_rate: int = 8000       # Hz, mono
-    excerpt_seconds: float = 12.0  # centered excerpt per song
+    sample_rate: int = 8000        # Hz, mono (downloads; build may resample lower)
+    excerpt_seconds: float = 12.0  # window per song (see length policy in cli)
+    stretch: bool = False          # resample each song to exactly the window
     normalize: bool = True         # unit L2 norm per song
 
     @property
@@ -19,13 +20,14 @@ class AudioConfig:
 
 @dataclass(frozen=True)
 class ZConfig:
-    rank: int = 32          # rank of the free perturbation Z = U V^T
+    rank: int = 48          # rank of the free perturbation Z = U V^T
     seed: int = 7           # base seed; noise fields are deterministic given (seed, theta)
 
 
 @dataclass(frozen=True)
 class RenderConfig:
     opt_resolution: int = 384          # px, square, used inside the ES loop
+    opt_stride: int = 4                # row subsampling for ES-loop renders
     presentation_resolution: int = 1536  # px, used for candidates shown in comparisons
     print_resolution: int = 4096       # px, final print render
 
