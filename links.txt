@@ -1,0 +1,7 @@
+# playlist, in cyclic order: one link or ytsearch query per line
+ytsearch1:Debussy Clair de Lune piano
+ytsearch1:Miles Davis So What
+ytsearch1:Aphex Twin Avril 14th
+ytsearch1:Nina Simone Feeling Good
+ytsearch1:Boards of Canada Roygbiv
+ytsearch1:Radiohead Weird Fishes Arpeggi

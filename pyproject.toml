@@ -1,0 +1,29 @@
+[project]
+name = "playlistviz"
+version = "0.1.0"
+description = "Cyclic playlist operator A from audio, with its free subspace optimized for aesthetics via BT-personalized metric weights"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pillow>=10.0",
+    "yt-dlp>=2025.1.1",
+    "soundfile>=0.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+playlistviz = "playlistviz.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/playlistviz"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

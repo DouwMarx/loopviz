@@ -1,0 +1,282 @@
+"""Command-line pipeline.
+
+  playlistviz download --links-file links.txt      # or --link URL (repeat)
+  playlistviz build                                 # X, factors, verification
+  playlistviz optimize --schedule                   # baseline + Dirichlet sweep
+  playlistviz optimize --baseline                   # equal weights only
+  playlistviz compare                               # pairwise comparison UI
+  playlistviz fit                                   # Bradley-Terry weight fit
+  playlistviz optimize --weights fitted.json        # re-run under fitted w
+  playlistviz render <candidate> --resolution 4096  # print-quality export
+  playlistviz report                                # common-yardstick table
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+
+from . import bt
+from .config import AudioConfig, OptConfig, Paths, RenderConfig, ZConfig
+from .ingest import (build_song_matrix, download, load_matrix, read_titles,
+                     save_matrix)
+from .loss import (DEFAULT_SCHEDULE, equal_weights, loss_vector, sample_weights,
+                   scalar_loss)
+from .metrics import METRIC_NAMES, features
+from .operator import PlaylistOperator
+from .optimize import make_objective, run_es
+from .render import render, save_png
+from .zspace import generate_Z, song_envelopes, theta_to_params
+
+
+def _paths(args) -> Paths:
+    return Paths(root=Path(args.root))
+
+
+def _load_operator(paths: Paths) -> PlaylistOperator:
+    matrix_path = paths.data / "songs.npz"
+    if not matrix_path.exists():
+        raise SystemExit("no song matrix - run `playlistviz build` first")
+    X, _ = load_matrix(matrix_path)
+    return PlaylistOperator.from_songs(X)
+
+
+# -- commands -----------------------------------------------------------------
+
+def cmd_download(args) -> None:
+    paths = _paths(args)
+    links = list(args.link or [])
+    if args.links_file:
+        links += [ln.strip() for ln in Path(args.links_file).read_text().splitlines()
+                  if ln.strip() and not ln.strip().startswith("#")]
+    if not links:
+        raise SystemExit("no links given (--link or --links-file)")
+    cfg = AudioConfig()
+    download(links, paths.audio, cfg.sample_rate)
+    print(f"downloaded {len(links)} tracks to {paths.audio}")
+
+
+def cmd_build(args) -> None:
+    paths = _paths(args)
+    cfg = AudioConfig()
+    wavs = sorted(paths.audio.glob("[0-9][0-9][0-9].wav"))
+    if len(wavs) < 2:
+        raise SystemExit(f"need at least 2 wavs in {paths.audio}")
+    print(f"building X from {len(wavs)} songs "
+          f"(D = {cfg.dim}, {cfg.excerpt_seconds}s @ {cfg.sample_rate} Hz)")
+    X = build_song_matrix(wavs, cfg)
+    titles = read_titles(paths.audio, wavs)
+    save_matrix(X, titles, paths.data / "songs.npz", cfg)
+
+    op = PlaylistOperator.from_songs(X)
+    err = op.playback_error()
+    cond = op.gram_condition()
+    print(f"playlist operator: N = {op.N}, D = {op.D}")
+    print(f"  max relative playback error |A x_n - x_n+1| / |x_n+1| = {err:.2e}")
+    print(f"  Gram condition number = {cond:.2e} "
+          f"({'ok' if cond < 1e8 else 'WARNING: near-duplicate songs'})")
+
+
+def _save_candidate(paths: Paths, cand_id: str, w: np.ndarray, alpha,
+                    theta: np.ndarray, phi: np.ndarray, loss_eq: float,
+                    img_presentation: np.ndarray) -> None:
+    d = paths.runs / cand_id
+    d.mkdir(parents=True, exist_ok=True)
+    save_png(img_presentation, d / "presentation.png")
+    (d / "candidate.json").write_text(json.dumps({
+        "id": cand_id,
+        "alpha": None if alpha is None else (None if np.isinf(alpha) else alpha),
+        "weights": list(map(float, w)),
+        "theta": list(map(float, theta)),
+        "phi": {n: float(v) for n, v in zip(METRIC_NAMES, phi)},
+        "loss_vector": list(map(float, loss_vector(phi))),
+        "loss_eq": float(loss_eq),
+    }, indent=2))
+
+
+def _optimize_one(op: PlaylistOperator, w: np.ndarray, alpha, cand_id: str,
+                  paths: Paths, zcfg: ZConfig, rcfg: RenderConfig,
+                  ocfg: OptConfig) -> float:
+    objective = make_objective(op, w, zcfg, rcfg.opt_resolution)
+    print(f"[{cand_id}] ES: {ocfg.generations} gens x {ocfg.population} "
+          f"at {rcfg.opt_resolution}px")
+    best, hist = run_es(objective, ocfg,
+                        progress=lambda g, l: print(f"  gen {g:2d}  loss {l:.3f}"))
+
+    # re-render the winner at presentation resolution and re-measure there
+    params = theta_to_params(best.theta)
+    env = song_envelopes(op.X)
+    zf = generate_Z(params, op.D, zcfg, envelopes=env, project_perp=op.project_perp)
+    L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
+    img = render(L, R, min(rcfg.presentation_resolution, op.D), params)
+    phi = features(img)
+    loss_eq = scalar_loss(phi, equal_weights())
+    _save_candidate(paths, cand_id, w, alpha, best.theta, phi, loss_eq, img)
+
+    # invariant: aesthetics never touched playback
+    err = op.playback_error(U=zf.U, Vp=zf.Vp, scale=zf.scale)
+    print(f"[{cand_id}] done. L_eq = {loss_eq:.3f}, playback error = {err:.2e}")
+    return loss_eq
+
+
+def cmd_optimize(args) -> None:
+    paths = _paths(args)
+    op = _load_operator(paths)
+    zcfg, rcfg = ZConfig(), RenderConfig()
+    rng = np.random.default_rng(args.seed)
+
+    jobs: list[tuple[str, np.ndarray, object]] = []
+    if args.weights:
+        w = np.asarray(json.loads(Path(args.weights).read_text())["w_simplex"])
+        jobs.append(("fitted", w, None))
+    elif args.baseline:
+        jobs.append(("baseline_eq", equal_weights(), float("inf")))
+    else:  # full schedule
+        for alpha, n_runs in DEFAULT_SCHEDULE:
+            for r in range(n_runs):
+                tag = "inf" if np.isinf(alpha) else f"{alpha:g}"
+                cand_id = f"a{tag}_r{r}" if not np.isinf(alpha) else "baseline_eq"
+                jobs.append((cand_id, sample_weights(alpha, rng), alpha))
+
+    results = []
+    for idx, (cand_id, w, alpha) in enumerate(jobs):
+        # distinct seed per run: distinct search subspace and mutation
+        # sequence, so candidates are visually diverse, not just re-weighted
+        ocfg = OptConfig(generations=args.generations, population=args.population,
+                         seed=args.seed + 1000 * idx)
+        loss_eq = _optimize_one(op, w, alpha, cand_id, paths, zcfg, rcfg, ocfg)
+        results.append((cand_id, loss_eq))
+
+    print("\ncommon yardstick (equal-weight loss, lower is better):")
+    for cand_id, loss_eq in sorted(results, key=lambda t: t[1]):
+        print(f"  {cand_id:16s} L_eq = {loss_eq:.3f}")
+
+
+def cmd_render(args) -> None:
+    paths = _paths(args)
+    op = _load_operator(paths)
+    cand_file = paths.runs / args.candidate / "candidate.json"
+    if not cand_file.exists():
+        raise SystemExit(f"no candidate {args.candidate} in {paths.runs}")
+    cand = json.loads(cand_file.read_text())
+    params = theta_to_params(np.asarray(cand["theta"]))
+    zcfg = ZConfig()
+    env = song_envelopes(op.X)
+    zf = generate_Z(params, op.D, zcfg, envelopes=env, project_perp=op.project_perp)
+    L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
+    P = min(args.resolution, op.D)
+    print(f"rendering {args.candidate} at {P}x{P}, {args.bits}-bit...")
+    img = render(L, R, P, params)
+    out = paths.runs / args.candidate / f"print_{P}.png"
+    save_png(img, out, bit_depth=args.bits)
+    print(f"wrote {out}")
+
+
+def cmd_compare(args) -> None:
+    from .compare_server import serve
+    paths = _paths(args)
+    serve(paths.runs, paths.comparisons, port=args.port)
+
+
+def cmd_fit(args) -> None:
+    paths = _paths(args)
+    comps = bt.load_comparisons(paths.comparisons)
+    if not comps:
+        raise SystemExit("no comparisons recorded - run `playlistviz compare` first")
+    loss_vectors = {}
+    for f in sorted(paths.runs.glob("*/candidate.json")):
+        d = json.loads(f.read_text())
+        loss_vectors[d["id"]] = np.asarray(d["loss_vector"])
+    fit = bt.fit_bt(comps, loss_vectors, l2=args.l2)
+    se = fit.std_errors()
+
+    print(f"Bradley-Terry fit on {fit.n_comparisons} comparisons "
+          f"(log-likelihood {fit.log_likelihood:.2f})\n")
+    print(f"  {'metric':22s} {'w_raw':>8s} {'stderr':>8s} {'w_simplex':>10s}")
+    order = np.argsort(-fit.w_simplex)
+    for i in order:
+        flag = "  <- prefers HIGHER loss?!" if fit.w_raw[i] < -se[i] else ""
+        print(f"  {METRIC_NAMES[i]:22s} {fit.w_raw[i]:8.3f} {se[i]:8.3f} "
+              f"{fit.w_simplex[i]:10.3f}{flag}")
+
+    out = paths.runs / "fitted_weights.json"
+    out.write_text(json.dumps({
+        "w_raw": list(map(float, fit.w_raw)),
+        "w_simplex": list(map(float, fit.w_simplex)),
+        "stderr": list(map(float, se)),
+        "n_comparisons": fit.n_comparisons,
+        "metric_names": METRIC_NAMES,
+    }, indent=2))
+    print(f"\nwrote {out}")
+    print("re-optimize under your weights with:\n"
+          f"  playlistviz optimize --weights {out}")
+
+
+def cmd_report(args) -> None:
+    paths = _paths(args)
+    cands = []
+    for f in sorted(paths.runs.glob("*/candidate.json")):
+        cands.append(json.loads(f.read_text()))
+    if not cands:
+        raise SystemExit("no candidates yet")
+    cands.sort(key=lambda d: d["loss_eq"])
+    print(f"{'candidate':16s} {'alpha':>6s} {'L_eq':>8s}   top weighted metrics")
+    for d in cands:
+        w = np.asarray(d["weights"])
+        top = np.argsort(-w)[:3]
+        tops = ", ".join(f"{METRIC_NAMES[i]}={w[i]:.2f}" for i in top)
+        alpha = d.get("alpha")
+        alpha_s = "eq" if alpha is None else f"{alpha:g}"
+        print(f"{d['id']:16s} {alpha_s:>6s} {d['loss_eq']:8.3f}   {tops}")
+
+
+# -- entry point ---------------------------------------------------------------
+
+def main(argv=None) -> None:
+    ap = argparse.ArgumentParser(prog="playlistviz", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--root", default=".", help="project root (default: cwd)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("download", help="download audio from youtube links")
+    p.add_argument("--link", action="append", help="youtube URL (repeatable)")
+    p.add_argument("--links-file", help="file with one URL per line")
+    p.set_defaults(fn=cmd_download)
+
+    p = sub.add_parser("build", help="build song matrix X and verify the operator")
+    p.set_defaults(fn=cmd_build)
+
+    p = sub.add_parser("optimize", help="ES-optimize the free part of A")
+    p.add_argument("--baseline", action="store_true", help="equal weights only")
+    p.add_argument("--weights", help="fitted_weights.json to optimize under")
+    p.add_argument("--generations", type=int, default=14)
+    p.add_argument("--population", type=int, default=12)
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(fn=cmd_optimize)
+
+    p = sub.add_parser("render", help="print-quality render of a candidate")
+    p.add_argument("candidate")
+    p.add_argument("--resolution", type=int, default=4096)
+    p.add_argument("--bits", type=int, choices=(8, 16), default=16)
+    p.set_defaults(fn=cmd_render)
+
+    p = sub.add_parser("compare", help="pairwise comparison web UI")
+    p.add_argument("--port", type=int, default=8765)
+    p.set_defaults(fn=cmd_compare)
+
+    p = sub.add_parser("fit", help="fit Bradley-Terry weights from comparisons")
+    p.add_argument("--l2", type=float, default=1.0)
+    p.set_defaults(fn=cmd_fit)
+
+    p = sub.add_parser("report", help="common-yardstick candidate table")
+    p.set_defaults(fn=cmd_report)
+
+    args = ap.parse_args(argv)
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
