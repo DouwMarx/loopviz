@@ -63,7 +63,25 @@ renders subsample rows (`opt_stride`); presentation and print renders are
 exact. Tone mapping (log compression, gamma, free nonmonotonic tone curve,
 vignette) turns the two fields into the printed grayscale image.
 
-## The free part Z (what the optimizer actually shapes)
+## Embedding: the picture of A can be (almost) any image
+
+The block-mean picture of A is linear in Z: `M = M0 + pool(U)·pool(P⊥V)ᵀ`.
+A P×P image has P² numbers; Z has ~D² free dimensions. So any square
+grayscale target T is reachable: SVD the residual `T_amp − M0`, lift the
+pixel-level singular vectors to sample level (pooling-consistent), absorb
+the small rank-N P⊥ distortion with fixed-point iterations (`embed.py`).
+Measured: 0.8% image error, playback error unchanged at ~1e-14.
+
+This moves the aesthetic search up a level: optimize a cheap 2D procedural
+generator (`targets.py` — spectral synthesis + domain warp + ridge, plus
+Worley crack, level-set figure/ground, and curl-flow LIC layers from the
+generative-art literature) directly against the metric loss at ~130 ms per
+evaluation, then embed the winner. `playlistviz embed` generates whole
+candidate pools this way, ~50x faster per candidate than ES in Z-space.
+The Z-space path (`playlistviz optimize`) remains for textures generated
+*from* the audio itself (envelope-modulated noise columns).
+
+## The free part Z (what the Z-space optimizer shapes)
 
 `Z = U V^T`, rank Q (default 48), always applied through `P_perp` so it is
 inaudible. Each column is
@@ -135,10 +153,14 @@ src/playlistviz/
   bt.py         Bradley-Terry fit + D-optimal pair selection
   compare_server.py  stdlib web UI for pairwise choices
   cli.py        the pipeline commands
+  targets.py    2D procedural target generator (spectral + worley/figure/flow layers)
+  embed.py      embed any image into A's free part (SVD lift + P_perp fixpoint)
 scripts/
   exp_free_aesthetics.py  no-music-constraint baseline; --negate sanity check
   exp_length_policy.py    crop vs pad vs stretch under fitted weights
-tests/          60 tests, no network needed (synthetic songs)
+  exp_decompose.py        A0 | Z P_perp | sum, mean and energy channels
+  exp_embed.py            target -> embedded picture of A, error + playback check
+tests/          72 tests, no network needed (synthetic songs)
 ```
 
 ## Setup

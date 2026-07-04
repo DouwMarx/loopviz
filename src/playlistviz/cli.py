@@ -202,6 +202,102 @@ def cmd_optimize(args) -> None:
         print(f"  {cand_id:20s} L_eq = {loss_eq:.3f}")
 
 
+def _run_embed_job(job: dict) -> tuple[str, float]:
+    """Worker: 2D-target ES -> embed winner into the operator -> candidate."""
+    from .embed import display, embed_image
+    from .targets import N_PARAMS_2D, generate_target, theta2d_to_params
+
+    paths = Paths(root=Path(job["root"]))
+    X, _ = load_matrix(paths.data / "songs.npz")
+    op = PlaylistOperator.from_songs(X)
+    w = np.asarray(job["w"])
+    ocfg = OptConfig(generations=job["generations"], population=job["population"],
+                     seed=job["es_seed"], subspace_rank=0)
+
+    def objective(theta):
+        from .optimize import EvalResult
+        img = generate_target(theta2d_to_params(theta), 384)
+        phi = features(img)
+        return EvalResult(theta=theta.copy(),
+                          loss=scalar_loss(phi, w, job["scalarization"]), phi=phi)
+
+    best, _ = run_es(objective, ocfg, n_params=N_PARAMS_2D)
+
+    # regenerate the winner at presentation res (seed-stable) and embed it
+    pres = job["embed_res"]
+    T = generate_target(theta2d_to_params(best.theta), pres)
+    res = embed_image(op, T, rank=job["embed_rank"])
+    img = display(res.achieved)
+    phi = features(img)
+    loss_eq = scalar_loss(phi, equal_weights())
+    err = op.playback_error(U=res.U, Vp=res.Vp, scale=res.scale)
+
+    d = paths.runs / job["id"]
+    d.mkdir(parents=True, exist_ok=True)
+    save_png(img, d / "presentation.png")
+    (d / "candidate.json").write_text(json.dumps({
+        "id": job["id"],
+        "kind": "embed",
+        "embed_rank": res.rank,
+        "embed_rel_error": res.rel_error,
+        "es_seed": job["es_seed"],
+        "alpha": job["alpha"],
+        "weights": list(map(float, w)),
+        "theta2d": list(map(float, best.theta)),
+        "theta": [],
+        "phi": {n: float(v) for n, v in zip(METRIC_NAMES, phi)},
+        "loss_vector": list(map(float, loss_vector(phi))),
+        "loss_eq": float(loss_eq),
+    }, indent=2))
+    print(f"[{job['id']}] done. L_eq = {loss_eq:.3f}, "
+          f"embed err {res.rel_error:.2%}, playback error = {err:.2e}")
+    return job["id"], loss_eq
+
+
+def cmd_embed(args) -> None:
+    """Candidate sweep via the fast path: 2D-target ES + embedding."""
+    paths = _paths(args)
+    _load_operator(paths)  # fail fast
+    rng = np.random.default_rng(args.seed)
+
+    draws: list[tuple[str, np.ndarray, object]] = []
+    if args.weights:
+        w = np.asarray(json.loads(Path(args.weights).read_text())["w_simplex"])
+        draws.append(("emb_fitted", w, None))
+    else:
+        for alpha, n_runs in DEFAULT_SCHEDULE:
+            for r in range(n_runs):
+                tag = "inf" if np.isinf(alpha) else f"{alpha:g}"
+                cand_id = f"emb_a{tag}_r{r}" if not np.isinf(alpha) else "emb_baseline"
+                a = None if np.isinf(alpha) else alpha
+                draws.append((cand_id, sample_weights(alpha, rng), a))
+
+    jobs = []
+    for idx, (cand_id, w, alpha) in enumerate(draws):
+        for rep in range(args.replicates):
+            full_id = cand_id if args.replicates == 1 else f"{cand_id}_s{rep}"
+            jobs.append({
+                "id": full_id, "w": list(map(float, w)), "alpha": alpha,
+                "es_seed": args.seed + 1000 * idx + 101 * rep,
+                "root": str(paths.root),
+                "generations": args.generations, "population": args.population,
+                "scalarization": args.scalarization,
+                "embed_res": args.embed_res, "embed_rank": args.embed_rank,
+            })
+
+    print(f"{len(jobs)} embed runs ({args.jobs} parallel jobs)")
+    if args.jobs > 1:
+        import concurrent.futures as cf
+        with cf.ProcessPoolExecutor(max_workers=args.jobs) as ex:
+            results = list(ex.map(_run_embed_job, jobs))
+    else:
+        results = [_run_embed_job(j) for j in jobs]
+
+    print("\ncommon yardstick (equal-weight loss):")
+    for cand_id, loss_eq in sorted(results, key=lambda t: t[1]):
+        print(f"  {cand_id:22s} L_eq = {loss_eq:.3f}")
+
+
 def cmd_render(args) -> None:
     paths = _paths(args)
     op = _load_operator(paths)
@@ -209,6 +305,24 @@ def cmd_render(args) -> None:
     if not cand_file.exists():
         raise SystemExit(f"no candidate {args.candidate} in {paths.runs}")
     cand = json.loads(cand_file.read_text())
+
+    if cand.get("kind") == "embed":
+        from .embed import display, embed_image
+        from .targets import generate_target, theta2d_to_params
+        P = min(args.resolution, op.D)
+        rank = min(max(cand["embed_rank"], P // 8), P)
+        print(f"re-embedding {args.candidate} at {P}x{P} (rank {rank}), "
+              f"{args.bits}-bit...")
+        T = generate_target(theta2d_to_params(np.asarray(cand["theta2d"])), P)
+        res = embed_image(op, T, rank=rank)
+        img = display(res.achieved)
+        err = op.playback_error(U=res.U, Vp=res.Vp, scale=res.scale)
+        print(f"embed rel error {res.rel_error:.2%}, playback error {err:.2e}")
+        out = paths.runs / args.candidate / f"print_{P}.png"
+        save_png(img, out, bit_depth=args.bits)
+        print(f"wrote {out}")
+        return
+
     params = theta_to_params(np.asarray(cand["theta"]))
     zcfg = ZConfig(rank=cand.get("z_rank", ZConfig().rank))
     env = song_envelopes(op.X)
@@ -329,6 +443,22 @@ def main(argv=None) -> None:
     p.add_argument("--population", type=int, default=12)
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(fn=cmd_optimize)
+
+    p = sub.add_parser("embed", help="candidate sweep via 2D targets + embedding "
+                                     "(~50x faster per candidate)")
+    p.add_argument("--weights", help="fitted_weights.json to optimize under")
+    p.add_argument("--replicates", type=int, default=1)
+    p.add_argument("--jobs", type=int, default=2,
+                   help="parallel workers (embedding is memory-heavy)")
+    p.add_argument("--embed-res", type=int, default=768,
+                   help="presentation embed resolution")
+    p.add_argument("--embed-rank", type=int, default=220)
+    p.add_argument("--scalarization", default="sum",
+                   choices=("sum", "chebyshev"))
+    p.add_argument("--generations", type=int, default=14)
+    p.add_argument("--population", type=int, default=12)
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(fn=cmd_embed)
 
     p = sub.add_parser("render", help="print-quality render of a candidate")
     p.add_argument("candidate")
