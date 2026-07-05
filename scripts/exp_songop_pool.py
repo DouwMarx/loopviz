@@ -82,6 +82,18 @@ def main() -> None:
     wav = ROOT / "data" / "audio" / f"{args.song:03d}.wav"
     signal, T = load_audio([wav])
     H = args.horizon_years
+
+    # audio previews: judge by EAR how low f can go and still be the song
+    import soundfile as sf
+    from scipy.signal import resample
+    prev = OUT / "audio_preview"
+    prev.mkdir(parents=True, exist_ok=True)
+    for fp in sorted({args.f_lo, 2500.0, 3000.0, 3500.0, 4000.0}):
+        if args.f_lo <= fp <= args.f_hi:
+            y = resample(signal, int(fp * T))
+            sf.write(str(prev / f"f{fp:.0f}.wav"), y / max(
+                1e-9, abs(y).max()) * 0.9, int(fp))
+    print(f"audio previews for the f floor: {prev}/f*.wav")
     print(f"song {args.song}: {T:.1f} s | f in [{args.f_lo:.0f}, "
           f"{args.f_hi:.0f}] Hz | horizon >= {H:.0f} yr | n <= {args.n_max}")
 
@@ -161,12 +173,9 @@ def main() -> None:
     fig.savefig(OUT / "fidelity_map.png", dpi=130)
     plt.close(fig)
 
-    # ---- rebuild the BT pool from the feasible set ----
-    for stale in (ROOT / "runs").glob("songop_*"):
-        for p in stale.iterdir():
-            p.unlink()
-        stale.rmdir()
-
+    # ---- extend the BT pool from the feasible set ----
+    # existing songop_* candidates are KEPT: they remain valid members of
+    # the feasible set and recorded comparisons reference them by id.
     feas = sorted((p for p in all_points if p.get("feasible")),
                   key=lambda p: (p["f_hz"], p["n"]))
     idx = np.unique(np.linspace(0, len(feas) - 1,

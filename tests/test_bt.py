@@ -100,3 +100,16 @@ def test_active_selection_prefers_uncertain_pairs():
     for a, b in pairs:
         p = bt.predict_prob(fit, loss_vectors[a], loss_vectors[b])
         assert 0.02 < p < 0.98  # not already-decided pairs
+
+
+def test_select_pairs_respects_blocks():
+    import numpy as np
+    from playlistviz.bt import select_pairs
+
+    rng = np.random.default_rng(0)
+    lv = {f"c{i}": rng.random(4) for i in range(6)}
+    blocks = {f"c{i}": ("a" if i < 3 else "b") for i in range(6)}
+    pairs = select_pairs(lv, None, n_pairs=20, blocks=blocks)
+    assert pairs  # within-block pairs exist: 2 * C(3,2) = 6
+    for x, y in pairs:
+        assert blocks[x] == blocks[y]

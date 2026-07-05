@@ -114,11 +114,17 @@ def select_pairs(loss_vectors: dict[str, np.ndarray],
                  fit: BTFit | None,
                  n_pairs: int,
                  exclude: set[frozenset] | None = None,
-                 rng: np.random.Generator | None = None) -> list[tuple[str, str]]:
+                 rng: np.random.Generator | None = None,
+                 blocks: dict[str, str] | None = None) -> list[tuple[str, str]]:
     """Choose informative pairs.
 
     With no fit yet: spread pairs by maximizing loss-vector distance (diverse
     candidates first). With a fit: D-optimal score p(1-p) * d^T H^{-1} d.
+
+    blocks: optional candidate-id -> block label (e.g. which song the
+    candidate encodes). Pairs are then drawn only WITHIN a block, so every
+    choice compares parameter settings on identical content - a blocked
+    design that keeps content preference out of the parameter weights.
     """
     rng = rng or np.random.default_rng(0)
     ids = sorted(loss_vectors)
@@ -126,6 +132,9 @@ def select_pairs(loss_vectors: dict[str, np.ndarray],
     cands = []
     for a in range(len(ids)):
         for b in range(a + 1, len(ids)):
+            if blocks is not None and \
+                    blocks.get(ids[a]) != blocks.get(ids[b]):
+                continue
             key = frozenset((ids[a], ids[b]))
             if key in exclude:
                 continue

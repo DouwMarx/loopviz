@@ -84,6 +84,7 @@ class CompareState:
     def __init__(self, runs_dir: Path, comparisons_path: Path):
         self.runs_dir = Path(runs_dir)
         self.comparisons_path = Path(comparisons_path)
+        self.blocks: dict[str, str] = {}
         self.loss_vectors = self._load_loss_vectors()
         self.queue: list[tuple[str, str]] = []
         self._refill()
@@ -98,6 +99,9 @@ class CompareState:
             d = json.loads(f.read_text())
             # rebuilt from phi by name: robust to metric-set changes
             out[d["id"]] = loss_vector_from_phi_dict(d["phi"])
+            # blocked design: pairs only within one song, so each choice
+            # compares parameter settings on identical content
+            self.blocks[d["id"]] = d.get("song", "")
         return out
 
     def _seen_pairs(self) -> set[frozenset]:
@@ -116,6 +120,7 @@ class CompareState:
             self.loss_vectors, fit, n_pairs=10,
             exclude=self._seen_pairs(),
             rng=np.random.default_rng(len(comps)),
+            blocks=self.blocks,
         )
 
     def next_pair(self) -> tuple[str, str] | None:
