@@ -49,7 +49,11 @@ def download(links: list[str], out_dir: Path, sample_rate: int) -> list[Path]:
                 break
             print(f"[{stem}] attempt {attempt + 1} failed, retrying...")
         else:
-            raise RuntimeError(f"download failed for {link}")
+            # dead/blocked links must not abort a 40-track batch: warn,
+            # leave a marker so the gap is visible, keep going
+            print(f"[{stem}] FAILED (link dead or blocked): {link}")
+            (out_dir / f"{stem}.failed.txt").write_text(link + "\n")
+            continue
         paths.append(target)
     return paths
 

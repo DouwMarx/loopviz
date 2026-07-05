@@ -49,13 +49,30 @@ def _load_operator(paths: Paths) -> PlaylistOperator:
 def cmd_download(args) -> None:
     paths = _paths(args)
     links = list(args.link or [])
+    manifest = None
+    if args.csv:
+        import csv as csvmod
+        rows = list(csvmod.DictReader(Path(args.csv).open()))
+        usable = [r for r in rows if r.get("link_status", "ok") != "broken"]
+        skipped = len(rows) - len(usable)
+        links += [r["link"] for r in usable]
+        manifest = {f"{i:03d}": {"issue": r.get("issue", ""),
+                                 "title": r.get("song_title", ""),
+                                 "artist": r.get("artist", ""),
+                                 "link": r["link"]}
+                    for i, r in enumerate(usable)}
+        if skipped:
+            print(f"skipping {skipped} rows with link_status=broken")
     if args.links_file:
         links += [ln.strip() for ln in Path(args.links_file).read_text().splitlines()
                   if ln.strip() and not ln.strip().startswith("#")]
     if not links:
-        raise SystemExit("no links given (--link or --links-file)")
+        raise SystemExit("no links given (--link, --links-file or --csv)")
     cfg = AudioConfig()
     download(links, paths.audio, cfg.sample_rate)
+    if manifest is not None:
+        (paths.data / "tracks.json").write_text(json.dumps(manifest, indent=2))
+        print(f"wrote {paths.data}/tracks.json ({len(manifest)} tracks)")
     print(f"downloaded {len(links)} tracks to {paths.audio}")
 
 
@@ -412,6 +429,9 @@ def main(argv=None) -> None:
     p = sub.add_parser("download", help="download audio from youtube links")
     p.add_argument("--link", action="append", help="youtube URL (repeatable)")
     p.add_argument("--links-file", help="file with one URL per line")
+    p.add_argument("--csv", help="track CSV (issue,song_title,artist,album,"
+                                 "link,link_status,notes); broken rows "
+                                 "skipped; writes data/tracks.json manifest")
     p.set_defaults(fn=cmd_download)
 
     p = sub.add_parser("build", help="build song matrix X and verify the operator")
