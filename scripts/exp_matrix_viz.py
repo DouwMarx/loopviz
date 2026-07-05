@@ -2,15 +2,13 @@
 that IS the song be shown?
 
 The operator is built once (song 2, n = 1000, rho = 0.95 - the practical
-full-rank limit from exp_operator_sizing). Every mode shows the SAME
-signed matrix; nothing is rendered or pooled, the only freedom is the
-value -> ink mapping:
+full-rank limit from exp_operator_sizing). Every mode shows the ENTIRE
+matrix - no crops, no pooling; a crop cannot reproduce the song, so it is
+not the artwork. The only freedom is the value -> ink mapping:
 
-- image modes (every entry, full resolution): black & white, diverging
-  palettes (RdBu, PuOr, coolwarm)
-- glyph modes (readable only for small sides -> detail crops): Hinton
-  diagram, bubble chart
-- 3D modes (detail crops): wireframe height field, 3D bar chart
+- image modes (1 entry = 1 pixel): black & white, diverging palettes
+- glyph modes (1 entry = 1 cell of 8x8 px): Hinton diagram, bubble chart
+- 3D: full wireframe height field, every row and column drawn
 
 Run: .venv/bin/python scripts/exp_matrix_viz.py [--song 2] [--n 1000]
                                                 [--rho 0.95]
@@ -33,8 +31,8 @@ ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "exp_matrix_viz"
 
 
-def load_fig(path: Path) -> np.ndarray:
-    """Load a saved matplotlib figure back as a square float RGB tile."""
+def load_img(path: Path) -> np.ndarray:
+    """Load a saved mode image back as a square float tile for the sheet."""
     from PIL import Image
 
     im = Image.open(path).convert("RGB")
@@ -51,6 +49,8 @@ def main() -> None:
     ap.add_argument("--rho", type=float, default=0.95)
     args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
+    for stale in OUT.glob("detail_*.png"):
+        stale.unlink()  # outputs of the old cropped version
 
     wav = ROOT / "data" / "audio" / f"{args.song:03d}.wav"
     signal, T = load_audio([wav])
@@ -61,65 +61,52 @@ def main() -> None:
     print(f"operator: n={pl.n} N={pl.N} f={pl.f:.0f} Hz  "
           f"playback err={err:.2e}")
 
-    # --- image modes, full resolution, 1 entry = 1 pixel ---
     g = matviz.gray(A0)
     save_png(g, OUT / "full_gray.png")
     save_png(g, OUT / "full_gray_16bit.png", bit_depth=16)
     palettes = ("RdBu_r", "PuOr", "coolwarm")
     for cm in palettes:
         matviz.save_rgb(matviz.diverging(A0, cm), OUT / f"full_{cm}.png")
+    matviz.hinton(A0, OUT / "full_hinton.png")
+    matviz.bubble(A0, OUT / "full_bubble.png")
+    matviz.wireframe(A0, OUT / "full_wireframe.png")
 
-    # --- detail crops for glyph / 3D modes ---
-    i, j = matviz.best_crop(A0, 96)
-    C96 = A0[i:i + 96, j:j + 96]
-    C64 = C96[:64, :64]
-    C40 = C96[:40, :40]
-    print(f"detail crop at ({i}, {j})")
-
-    matviz.hinton(C96, OUT / "detail_hinton.png")
-    matviz.bubble(C96, OUT / "detail_bubble.png")
-    matviz.wireframe(C64, OUT / "detail_wireframe.png")
-    matviz.bars3d(C40, OUT / "detail_bars3d.png")
-
-    # --- contact sheet: 1:1 crops of image modes + the glyph figures ---
-    c = (args.n - 500) // 2
-    sl = slice(c, c + 500)
-    tiles = [("black & white (500px 1:1 crop)", g[sl, sl])]
-    tiles += [(f"diverging {cm} (500px 1:1 crop)",
-               matviz.diverging(A0, cm)[sl, sl]) for cm in palettes]
-    tiles += [(f"Hinton diagram ({C96.shape[0]}px detail)",
-               load_fig(OUT / "detail_hinton.png")),
-              (f"bubble chart ({C96.shape[0]}px detail)",
-               load_fig(OUT / "detail_bubble.png")),
-              (f"3D wireframe ({C64.shape[0]}px detail)",
-               load_fig(OUT / "detail_wireframe.png")),
-              (f"3D bars ({C40.shape[0]}px detail)",
-               load_fig(OUT / "detail_bars3d.png"))]
+    tiles = [("black & white", g)]
+    tiles += [(f"diverging {cm}", matviz.diverging(A0, cm))
+              for cm in palettes]
+    tiles += [("Hinton diagram (full matrix, 8px cells)",
+               load_img(OUT / "full_hinton.png")),
+              ("bubble chart (full matrix, 8px cells)",
+               load_img(OUT / "full_bubble.png")),
+              ("3D wireframe (full matrix, stride 1)",
+               load_img(OUT / "full_wireframe.png"))]
 
     make_sheet(tiles, OUT / "viz_modes.png", tile_size=500, cols=4, readme=f"""\
 # exp_matrix_viz: display modes for the pixel-exact song operator
 
 One operator (song {wav.name}, {T:.1f} s, n={pl.n}, N={pl.N},
-f={pl.f:.0f} Hz, playback err {err:.2e}), eight ways of turning its
-signed entries into ink. NOTHING is rendered or pooled - every mode shows
-the exact matrix; the only freedom is the value -> ink mapping.
+f={pl.f:.0f} Hz, playback err {err:.2e}), seven ways of turning its
+signed entries into ink. Every mode shows the ENTIRE matrix - the artwork
+claim is that the displayed object reproduces the song, and a crop does
+not, so crops are banned. The only freedom is the value -> ink mapping.
+(A 3D bar mode was removed: a million bars cannot actually be rendered,
+and showing a subset is against the spirit of the piece.)
 
 What is varied: only the display mode.
 
 - full_gray.png / full_gray_16bit.png - black & white, mid-gray = 0,
-  symmetric 99.5-percentile clip. The print master.
+  symmetric 99.5-percentile clip, 1 entry = 1 pixel. The print master.
 - full_RdBu_r / full_PuOr / full_coolwarm - diverging palettes around 0
-  (sign becomes hue, magnitude becomes saturation).
-- detail_hinton.png - square area ~ |entry|, white = +, black = -
-  ({C96.shape[0]}px detail crop; unreadable at full n).
-- detail_bubble.png - circle area ~ |entry|, diverging color.
-- detail_wireframe.png - the matrix as a height field ({C64.shape[0]}px).
-- detail_bars3d.png - 3D bars, only readable at ~{C40.shape[0]}px.
+  (sign becomes hue, magnitude becomes saturation), 1 entry = 1 pixel.
+- full_hinton.png - Hinton diagram, 1 entry = 1 cell of 8x8 px
+  ({8 * pl.n}px image): square area ~ |entry|, white = +, black = -.
+- full_bubble.png - circle area ~ |entry|, diverging color, 8px cells.
+- full_wireframe.png - the whole matrix as a height field, every row and
+  column drawn (stride 1). Dense, as it must be.
 
-The sheet shows 1:1 crops for image modes (downscaling a signed matrix
-cancels toward gray - view the full_*.png files at native size).
-Detail crop anchored at the maximum-energy {C96.shape[0]}px block,
-({i}, {j}).
+Viewing note: the contact sheet downscales; a signed matrix cancels
+toward flat gray when downscaled, so judge the full_*.png files at
+native size (100% zoom), not the sheet tiles.
 """)
     print(f"wrote {OUT}/viz_modes.png")
 

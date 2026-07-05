@@ -72,10 +72,8 @@ def main() -> None:
     print(f"operator n={pl.n} N={N} f={pl.f:.0f} Hz  "
           f"s range [{svd.s[-1]:.2e}, {svd.s[0]:.2e}]")
 
-    c = (args.n - 500) // 2
-    sl = slice(c, c + 500)
     tiles = [(f"exact (tol 0)  rank {N}",
-              gray(reconstruct(svd, np.zeros(N)))[sl, sl])]
+              gray(reconstruct(svd, np.zeros(N))))]
     rows = []
     orders = {"smallest-first": np.arange(N)[::-1],
               "largest-first": np.arange(N)}
@@ -89,7 +87,7 @@ def main() -> None:
             img = gray(A)
             save_png(img, OUT / f"A_{name}_tol{tol:.0e}.png")
             tiles.append((f"{name} tol={tol:.0e}: dropped {k}/{N}  "
-                          f"loop3 err {loops[-1]:.1e}", img[sl, sl]))
+                          f"loop3 err {loops[-1]:.1e}", img))
             rows.append({"order": name, "tol": tol, "dropped": k,
                          "max_window_err": float(err),
                          "loop_err": loops})
@@ -114,7 +112,9 @@ greedily from the small-s end and from the large-s end at tol in {TOLS}.
 
 Readings:
 - how many components each budget buys, from each end, and what the
-  picture looks like (sheet shows 500px 1:1 crops; full images saved).
+  picture looks like (sheet tiles show the full matrices; downscaling
+  cancels signed texture toward gray, so judge the A_*.png files at
+  native size).
 - loop errs = drift from window 1 after 1, 2, 3 full passes through the
   song: the exact operator acts as a cyclic shift on window space
   (eigenvalues on the unit circle - loops forever); approximation makes

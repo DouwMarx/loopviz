@@ -24,7 +24,10 @@ PAGE = """<!DOCTYPE html>
          display: flex; flex-direction: column; align-items: center; }
   h2 { font-weight: 300; }
   .pair { display: flex; gap: 24px; }
+  /* nearest-neighbor scaling: browser smoothing would average adjacent
+     signed matrix entries and cancel pixel-exact candidates to flat gray */
   .pair img { width: 42vw; max-width: 640px; cursor: pointer;
+              image-rendering: pixelated;
               border: 3px solid #333; border-radius: 4px; }
   .pair img:hover { border-color: #7af; }
   #status { margin-top: 12px; color: #888; }

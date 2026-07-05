@@ -94,18 +94,23 @@ construction. Display modes for the materialized matrix (grayscale,
 diverging palettes, Hinton, bubble, wireframe, 3D bars) live in
 `matviz.py` / `exp_matrix_viz.py`.
 
-An accepted playback error is a third design axis, but a subtle one. The
-SVD of A0 prices any component attenuation in closed form
+An accepted playback error was investigated as a third design axis and
+REJECTED. The SVD of A0 prices any component attenuation in closed form
 (`err_k = sqrt(sum_i (a_i s_i v_i.w_k)^2)`), so a tolerance is a budget —
-but static error is NOT the binding constraint. The exact operator's
-eigenvalues sit on the unit circle (it acts as the cyclic shift on window
-space), so it loops forever; truncation moves eigenvalues off the circle
-and a statically-fine 1e-2 approximation explodes within one pass
-(exp_error_budget). "Faithfully loops" is a spectral-stability condition,
-checked numerically per candidate in the aesthetic ES
-(exp_aesthetic_songop: rho grid x attenuation curve x ink map, equal
-metric weights). Perturbations `Y P_perp` with range(Y) inside window
-space are exact AND provably loop-stable — doc/math.pdf section 5.
+but (a) loop drift is ~850x the static tolerance (truncation moves
+eigenvalues off the unit circle; a statically-fine 1e-2 approximation
+explodes within one pass — exp_error_budget), and (b) an ES that was free
+to spend the budget chose not to: within faithful-loop budgets,
+attenuation is cosmetically invisible. So candidates are EXACT only, and
+"loops forever" is structural (eigenvalues on the unit circle by
+construction; the float64 drift per pass is measured and reported as a
+loop horizon per rho). The honest aesthetic parameters are rho, the ink
+map, and the song — enumerated as a grid of comparison candidates by
+exp_songop_pool for pairwise BT preference collection (`playlistviz
+compare`). Crops are banned in all display modes: a crop cannot
+reproduce the song, so it is not the artwork. Perturbations `Y P_perp`
+with range(Y) inside window space would be exact AND provably loop-stable
+(doc/math.pdf section 5) but are deliberately not used — simplicity.
 
 ## The math, didactically
 
@@ -210,9 +215,10 @@ src/playlistviz/
   targets.py    2D cloud target generator (spectral + warp + figure + flow)
   sheet.py      labeled contact sheets for experiment outputs
   embed.py      embed any image into A's free part (SVD lift + P_perp fixpoint)
-  songmatrix.py one song as an n x n operator: sizing math, dither, build
-  matviz.py     display modes for exact matrices (gray, diverging, hinton,
-                bubble, wireframe, 3D bars)
+  songmatrix.py one song as an n x n operator: sizing math, dither, build,
+                SVD error pricing, loop-degradation measurement
+  matviz.py     full-matrix display modes (gray, diverging, hinton, bubble,
+                wireframe) - every entry shown, crops banned
 doc/
   math.tex/.pdf didactic derivation of the whole construction
 scripts/        each writes a README.md into its runs/exp_* output folder
@@ -224,8 +230,8 @@ scripts/        each writes a README.md into its runs/exp_* output folder
   exp_operator_sizing.py  rank fraction vs conditioning; capacity tables
   exp_matrix_viz.py       display modes for the pixel-exact operator
   exp_error_budget.py     what a playback tolerance buys; loop stability
-  exp_aesthetic_songop.py ES over (rho, attenuation-in-budget, ink map)
-tests/          87 tests, no network needed (synthetic songs)
+  exp_songop_pool.py      exact-only (rho x ink) grid -> BT candidates
+tests/          88 tests, no network needed (synthetic songs)
 ```
 
 ## Setup

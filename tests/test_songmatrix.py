@@ -95,18 +95,25 @@ class TestMatviz:
         assert rgb.shape == (16, 16, 3)
         assert rgb.min() >= 0 and rgb.max() <= 1
 
-    def test_best_crop_finds_energy(self):
-        A = np.zeros((64, 64))
-        A[32:48, 16:32] = 5.0  # block-aligned: best_crop scans the block grid
-        i, j = matviz.best_crop(A, 16)
-        assert A[i:i + 16, j:j + 16].sum() == pytest.approx(A.sum())
-
-    def test_figure_modes_write_files(self, tmp_path):
+    def test_hinton_full_matrix_raster(self, tmp_path):
+        from PIL import Image
         A = np.random.default_rng(2).standard_normal((24, 24))
-        for fn in (matviz.hinton, matviz.bubble, matviz.wireframe,
-                   matviz.bars3d):
-            out = fn(A, tmp_path / f"{fn.__name__}.png", dpi=40)
-            assert out.exists() and out.stat().st_size > 0
+        out = matviz.hinton(A, tmp_path / "h.png", cell=6)
+        im = Image.open(out)
+        assert im.size == (24 * 6, 24 * 6)      # every entry gets a cell
+        vals = set(np.asarray(im).ravel().tolist())
+        assert vals <= {0, 128, 255}            # black / gray bg / white
+
+    def test_bubble_full_matrix_raster(self, tmp_path):
+        from PIL import Image
+        A = np.random.default_rng(3).standard_normal((16, 16))
+        out = matviz.bubble(A, tmp_path / "b.png", cell=5)
+        assert Image.open(out).size == (16 * 5, 16 * 5)
+
+    def test_wireframe_writes_file(self, tmp_path):
+        A = np.random.default_rng(4).standard_normal((24, 24))
+        out = matviz.wireframe(A, tmp_path / "w.png", dpi=40)
+        assert out.exists() and out.stat().st_size > 0
 
     def test_sheet_accepts_rgb_tiles(self, tmp_path):
         gray_tile = np.random.default_rng(3).random((20, 20))

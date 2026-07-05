@@ -49,10 +49,9 @@ def main() -> None:
         A0 = materialize(op)
         img = gray(A0)
         save_png(img, OUT / f"A0_rho{rho:.2f}.png")
-        c = (args.n - 500) // 2  # 1:1 center crop; downscaling a signed
-        tiles.append((f"rho={pl.rho:.2f}  N={pl.N}  f={pl.f:.0f} Hz  "  # matrix
-                      f"cond={cond:.1e}  err={err:.0e} (500px 1:1 crop)",
-                      img[c:c + 500, c:c + 500]))
+        tiles.append((f"rho={pl.rho:.2f}  N={pl.N}  f={pl.f:.0f} Hz  "
+                      f"cond={cond:.1e}  err={err:.0e} (full matrix)",
+                      img))
         rows.append({"rho": pl.rho, "n": pl.n, "N": pl.N, "f_hz": pl.f,
                      "gram_cond": cond, "playback_err": err})
         print(f"  rho={pl.rho:.2f}  N={pl.N:5d}  f={pl.f:7.0f} Hz  "
@@ -108,9 +107,11 @@ one-song-per-print construction.
 
 ## Visual finding
 
-The sheet shows 1:1 center crops (full images: A0_rho*.png). Downscaling
-a signed A0 averages neighbors and cancels toward gray, so the object
-must be viewed/printed at native resolution. The texture wavelength
+The sheet tiles show the full matrices (files: A0_rho*.png). Downscaling
+a signed A0 averages neighbors and cancels toward gray - so the sheet
+tiles look flat and the files must be judged at native resolution (100%
+zoom); that is a property of the object, not a rendering choice. The
+texture wavelength
 follows the implied sample rate: music energy lives at ~100-2000 Hz, so
 at f ~ 7.5 kHz each audio cycle spans several pixels and A0 reads as
 coherent fine striations; at f ~ 4 kHz the music sits near Nyquist and
