@@ -63,6 +63,37 @@ renders subsample rows (`opt_stride`); presentation and print renders are
 exact. Tone mapping (log compression, gamma, free nonmonotonic tone curve,
 vignette) turns the two fields into the printed grayscale image.
 
+## The pixel-exact song operator (current focus)
+
+The second construction drops the playlist, the free part, and ALL
+rendering: one song is cut into N windows of n samples (columns of W) and
+the cyclic window-advance operator `A0 = W S G^-1 W^T` is an n x n matrix
+displayed 1 entry = 1 pixel. What you print is exactly the matrix that
+plays the song. One equation ties every design knob together:
+
+```
+samples  L = f T = N n = rho n^2      =>      n = sqrt(f T / rho)
+```
+
+- `n` — canvas side: paper side / pixel pitch (~0.5 mm/px is comfortably
+  discernible at 50 cm; `songmatrix.DISCERNIBLE_PITCH_MM`)
+- `f` — implied sample rate; `T` — song duration
+- `rho = N/n` — rank fraction = information density (fraction of pixels
+  carrying independent audio). Full rank (`rho = 1`, one sample per pixel)
+  sits exactly on the existence boundary: adjacent windows of real audio
+  correlate, the Gram degenerates, playback breaks. Measured practical
+  limit: `rho ~ 0.95` (exp_operator_sizing).
+
+Digital silence is a hard wall — a linear map cannot send the zero vector
+to the music that follows it — so `songmatrix.build` adds -70 dB
+deterministic dither (inaudible; playback stays exact to ~1e-8).
+
+Capacity at 8 kHz: a 2-minute song is a ~1000 px (50 cm) print; the full
+27-minute playlist would need ~3600 px (1.8 m). It is a one-song-per-print
+construction. Display modes for the materialized matrix (grayscale,
+diverging palettes, Hinton, bubble, wireframe, 3D bars) live in
+`matviz.py` / `exp_matrix_viz.py`.
+
 ## The math, didactically
 
 `doc/math.pdf` derives everything in ~3 pages: why A_0 = X_next G^{-1} X^T
@@ -166,6 +197,9 @@ src/playlistviz/
   targets.py    2D cloud target generator (spectral + warp + figure + flow)
   sheet.py      labeled contact sheets for experiment outputs
   embed.py      embed any image into A's free part (SVD lift + P_perp fixpoint)
+  songmatrix.py one song as an n x n operator: sizing math, dither, build
+  matviz.py     display modes for exact matrices (gray, diverging, hinton,
+                bubble, wireframe, 3D bars)
 doc/
   math.tex/.pdf didactic derivation of the whole construction
 scripts/        each writes a README.md into its runs/exp_* output folder
@@ -174,7 +208,9 @@ scripts/        each writes a README.md into its runs/exp_* output folder
   exp_decompose.py        A0 | embedded Z P_perp | sum, mean and energy channels
   exp_embed.py            target -> embedded picture of A, error + playback check
   exp_song_matrix.py      one song as an n x n matrix, 1 entry = 1 pixel
-tests/          70 tests, no network needed (synthetic songs)
+  exp_operator_sizing.py  rank fraction vs conditioning; capacity tables
+  exp_matrix_viz.py       display modes for the pixel-exact operator
+tests/          83 tests, no network needed (synthetic songs)
 ```
 
 ## Setup

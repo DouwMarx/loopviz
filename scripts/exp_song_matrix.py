@@ -10,11 +10,9 @@ A0 is n x n regardless of N, so with n = image side it is DISPLAYED 1:1,
 one matrix entry per pixel - the picture IS the matrix, no averaging.
 Seeded with window 1, iterating A0 plays the song and repeats.
 
-Dimension math: an n x n image holds L = N*n samples, i.e. T = N*n/f
-seconds at sample rate f; to fit a song of duration T, resample to
-f = N*n/T. The square split N = n maximizes audio per pixel but sits
-exactly on the existence boundary (windows go nearly dependent - measured
-Gram condition ~1e10, playback breaks); N = n/2 is comfortable.
+Sizing/conditioning are studied systematically in exp_operator_sizing.py
+and display modes in exp_matrix_viz.py; this script keeps the original
+A0-vs-Gram comparison. Construction lives in playlistviz.songmatrix.
 
 Run: .venv/bin/python scripts/exp_song_matrix.py [--song 0] [--n 1024]
                                                  [--windows 512]
@@ -25,22 +23,16 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.operator import PlaylistOperator
+from playlistviz.matviz import gray
 from playlistviz.render import save_png
 from playlistviz.sheet import make_sheet
+from playlistviz.songmatrix import Plan, build, load_audio, materialize
 
 ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "exp_song_matrix"
-
-
-def unit_signed(img):
-    """Symmetric robust normalization of a signed matrix to [0, 1]."""
-    m = np.percentile(np.abs(img), 99.5)
-    return np.clip(img / max(2 * m, 1e-30) + 0.5, 0, 1)
 
 
 def main() -> None:
@@ -57,36 +49,24 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
 
     wav = ROOT / "data" / "audio" / f"{args.song:03d}.wav"
-    data, sr = sf.read(str(wav), dtype="float64")
-    if data.ndim == 2:
-        data = data.mean(axis=1)
-    T_sec = data.size / sr
-    f_target = N * n / T_sec
+    signal, T_sec = load_audio([wav])
+    pl = Plan(n=n, N=N, f=N * n / T_sec, T=T_sec)
+    print(f"song {args.song}: {T_sec:.0f} s, resampled to "
+          f"{pl.f:.0f} Hz so that L = {N} x {n} = {pl.samples} samples")
 
-    from scipy.signal import resample
-    song = resample(data, N * n)
-    print(f"song {args.song}: {T_sec:.0f} s, resampled {sr} -> "
-          f"{f_target:.0f} Hz so that L = {N} x {n} = {N * n} samples")
-
-    # windows as columns: W is n x N; cyclic window-advance operator on R^n
-    W = song.reshape(N, n).T  # column k = window k (samples k*n .. k*n+n-1)
-    W = W / np.linalg.norm(W, axis=0, keepdims=True)
-    op = PlaylistOperator.from_songs(W)
-
+    op, W = build(signal, pl)
     cond = op.gram_condition()
     err = op.playback_error()
     print(f"W: {n} x {N}, Gram condition {cond:.2e}, "
           f"playback (window-advance) error {err:.2e}")
 
-    # materialize A0 exactly: n x n, one entry per pixel
-    L, R = op.factors()
-    A0 = L @ R.T
-    img = unit_signed(A0)
+    A0 = materialize(op)
+    img = gray(A0)
     save_png(img, OUT / "A0_exact.png")
     save_png(img, OUT / "A0_exact_16bit.png", bit_depth=16)
 
     # the raw Gram (song self-similarity across windows) for comparison
-    G_img = unit_signed(W.T @ W - np.eye(N))
+    G_img = gray(W.T @ W - np.eye(N))
 
     make_sheet([(f"A0 = W S G^-1 W^T, exact {n}x{n} (1 entry = 1 pixel)", img),
                 ("Gram W^T W (window self-similarity), for reference", G_img)],
@@ -94,24 +74,24 @@ def main() -> None:
 # exp_song_matrix: one song as its own square matrix
 
 What is investigated: dropping the playlist and the free part entirely.
-One song ({wav.name}), resampled to {f_target:.0f} Hz so it has exactly
+One song ({wav.name}), resampled to {pl.f:.0f} Hz so it has exactly
 {N} x {n} samples, is cut into {N} windows of {n} samples (columns of W).
 The cyclic window-advance operator A0 = W S G^-1 W^T is then {n} x {n}
 and is displayed EXACTLY - one matrix entry per pixel, no pooling, no
 approximation of any kind. Seeded with window 1, iterating A0 plays the
-song and repeats.
+song and repeats. (-70 dB dither is added so silent stretches cannot
+break the operator; see songmatrix.build.)
 
 Why N < n: at N = n (the perfectly square split) the windows of real audio
 are nearly linearly dependent (adjacent windows correlate; quiet passages
 repeat) - measured Gram condition ~1e10 and playback breaks. N = n/2 keeps
-a comfortable rank margin; the operator is then rank N inside an n x n
-canvas.
+a comfortable rank margin; exp_operator_sizing.py maps the whole boundary
+(practical limit rho = N/n ~ 0.95).
 
-- Gram condition number: {cond:.2e} (windows {'independent - operator exists' if cond < 1e10 else 'NEARLY DEPENDENT - caution'})
+- Gram condition number: {cond:.2e}
 - playback (window-advance) error: {err:.2e}
-- A0 has rank {N} in an {n} x {n} canvas - the pure music object, no Z.
-  Dimension math: an n x n image holds N x n = n^2/2 samples here, i.e.
-  T = N n / f seconds of audio at rate f.
+- A0 has rank {N} in an {n} x {n} canvas. Dimension math: an n x n image
+  holds N x n samples, i.e. T = N n / f seconds of audio at rate f.
 
 Files: A0_exact.png (8-bit), A0_exact_16bit.png (print).
 """)
