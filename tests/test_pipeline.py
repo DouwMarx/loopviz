@@ -15,8 +15,7 @@ from playlistviz.metrics import METRIC_NAMES, features
 from playlistviz.operator import PlaylistOperator
 from playlistviz.optimize import make_objective, run_es
 from playlistviz.render import render, save_png
-from playlistviz.zspace import (N_PARAMS, generate_Z, song_envelopes,
-                                theta_to_params)
+from playlistviz.zspace import N_PARAMS, generate_Z, theta_to_params
 
 
 def synthetic_songs(rng, D=4000, N=5):
@@ -88,11 +87,10 @@ def test_candidates_to_bt_fit(tmp_path, op):
     machine and fit."""
     runs = tmp_path / "runs"
     rng = np.random.default_rng(3)
-    env = song_envelopes(op.X)
     for i in range(3):
         theta = rng.standard_normal(N_PARAMS)
         params = theta_to_params(theta)
-        zf = generate_Z(params, op.D, ZConfig(rank=4), envelopes=env,
+        zf = generate_Z(params, op.D, ZConfig(rank=4),
                         project_perp=op.project_perp)
         L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
         img = render(L, R, 128, params)

@@ -63,6 +63,14 @@ renders subsample rows (`opt_stride`); presentation and print renders are
 exact. Tone mapping (log compression, gamma, free nonmonotonic tone curve,
 vignette) turns the two fields into the printed grayscale image.
 
+## The math, didactically
+
+`doc/math.pdf` derives everything in ~3 pages: why A_0 = X_next G^{-1} X^T
+solves A X = X_next (the Gram matrix G unmixes song correlations), why the
+full solution family is A_0 + Z P_perp, how the block-mean/block-energy
+pictures stream through the factors, and how an arbitrary image is embedded
+(SVD compression + pooling-exact lift + rank-N fixed-point correction).
+
 ## Embedding: the picture of A can be (almost) any image
 
 The block-mean picture of A is linear in Z: `M = M0 + pool(U)·pool(P⊥V)ᵀ`.
@@ -78,8 +86,11 @@ Worley crack, level-set figure/ground, and curl-flow LIC layers from the
 generative-art literature) directly against the metric loss at ~130 ms per
 evaluation, then embed the winner. `playlistviz embed` generates whole
 candidate pools this way, ~50x faster per candidate than ES in Z-space.
-The Z-space path (`playlistviz optimize`) remains for textures generated
-*from* the audio itself (envelope-modulated noise columns).
+Two generator families are kept deliberately separate (`--family`):
+`cloud` (spectral nebula/ink washes, default) and `cells` (Worley crack
+networks); `mixed` frees everything for exploration. The Z-space path
+(`playlistviz optimize`) remains as an alternative texture route; Z depends
+only on (seed, theta), never on the audio.
 
 ## The free part Z (what the Z-space optimizer shapes)
 
@@ -87,15 +98,13 @@ The Z-space path (`playlistviz optimize`) remains for textures generated
 inaudible. Each column is
 
 ```
-window(t) * noise(t) * songmod(t)
+window(t) * noise(t)
 ```
 
 - `noise`: 1/f^beta spectral noise, per-column beta spread (texture mix)
 - `window`: Gaussian bumps at cached random positions; the `locality` theta
   interpolates global support (full-width streaks) to compact blobs. This is
   the anti-"line-ey" lever: localized columns contribute local patches.
-- `songmod`: amplitude modulation by the smoothed |audio| envelope of song
-  k mod N — ties the free texture to the actual music.
 
 All theta-independent randomness is cached (`ZGenerator`); one theta
 evaluation costs a batched irfft plus elementwise work.
@@ -153,14 +162,18 @@ src/playlistviz/
   bt.py         Bradley-Terry fit + D-optimal pair selection
   compare_server.py  stdlib web UI for pairwise choices
   cli.py        the pipeline commands
-  targets.py    2D procedural target generator (spectral + worley/figure/flow layers)
+  targets.py    2D target generator, families: cloud | cells | mixed
+  sheet.py      labeled contact sheets for experiment outputs
   embed.py      embed any image into A's free part (SVD lift + P_perp fixpoint)
-scripts/
+doc/
+  math.tex/.pdf didactic derivation of the whole construction
+scripts/        each writes a README.md into its runs/exp_* output folder
   exp_free_aesthetics.py  no-music-constraint baseline; --negate sanity check
   exp_length_policy.py    crop vs pad vs stretch under fitted weights
   exp_decompose.py        A0 | Z P_perp | sum, mean and energy channels
   exp_embed.py            target -> embedded picture of A, error + playback check
-tests/          72 tests, no network needed (synthetic songs)
+  exp_families.py         cloud vs cells generator families
+tests/          71 tests, no network needed (synthetic songs)
 ```
 
 ## Setup

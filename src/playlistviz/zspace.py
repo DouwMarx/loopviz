@@ -15,7 +15,7 @@ and generate U, V procedurally from a small parameter vector theta.
 Column model (the image is built from outer products col_U * col_V^T, so
 column structure is directly visible texture):
 
-    col_k = window_k(t) * noise_k(t) * songmod_k(t), then ridge-sharpened
+    col_k = window_k(t) * noise_k(t), then ridge-sharpened
 
 - noise_k: 1/f^beta_k spectral noise; beta_k = beta_center +- beta_spread
   (per-column offsets cached), so columns span a range of roughnesses.
@@ -23,8 +23,10 @@ column structure is directly visible texture):
   set by theta. locality=0 -> global support (full-length streaks in the
   image); locality=1 -> compact blobs. This is the anti-"line-ey" lever:
   a localized column contributes a local patch, not a full-width line.
-- songmod_k: optional amplitude modulation by the |audio| envelope of song
-  k mod N (env_mix in theta), tying the texture to the actual music.
+
+Z depends only on (seed, theta), never on the audio: the artwork's claim is
+that A plays the playlist exactly, and the free part stays mathematically
+independent of it.
 
 Everything is deterministic given (seed, theta). The theta-independent
 randomness (white spectra, bump centers, per-column offsets) is cached in a
@@ -51,8 +53,6 @@ PARAM_RANGES: dict[str, tuple[float, float]] = {
     "log_width": (-3.3, -0.7),     # log10 bump width as fraction of D
     "width_spread": (0.0, 1.0),    # per-column width diversity (decades)
     "log_amp": (-2.5, 1.5),        # log10 amplitude of Z relative to A0
-    "env_mix_u": (0.0, 1.0),       # song-envelope modulation of U
-    "env_mix_v": (0.0, 1.0),
     "ridge_amount": (0.0, 1.0),    # sparsifying tanh mix
     "ridge_sharp": (1.0, 16.0),
     # rendering / tone (grayscale)
@@ -84,19 +84,6 @@ def theta_to_params(theta: np.ndarray) -> dict[str, float]:
     return out
 
 
-def song_envelopes(X: np.ndarray, smooth: int = 2048) -> np.ndarray:
-    """Smoothed |x| envelope per song, normalized to mean 1. Shape (D, N)."""
-    env = np.abs(X)
-    smooth = min(smooth, X.shape[0])
-    kernel = np.ones(smooth) / smooth
-    for j in range(env.shape[1]):
-        env[:, j] = np.convolve(env[:, j], kernel, mode="same")
-        m = env[:, j].mean()
-        if m > 0:
-            env[:, j] /= m
-    return env
-
-
 @dataclass
 class ZFactors:
     U: np.ndarray      # (D, q)
@@ -126,8 +113,7 @@ class ZGenerator:
             self.beta_off[role] = rng.uniform(-1, 1, size=q)
             self.width_off[role] = rng.uniform(-1, 1, size=q)
 
-    def _columns(self, role: str, params: dict[str, float],
-                 envelopes: np.ndarray | None) -> np.ndarray:
+    def _columns(self, role: str, params: dict[str, float]) -> np.ndarray:
         D, q = self.D, self.cfg.rank
         p = params
 
@@ -155,20 +141,14 @@ class ZGenerator:
         if r > 0:
             cols = (1.0 - r) * cols + r * np.tanh(p["ridge_sharp"] * cols)
 
-        m = p[f"env_mix_{role}"]
-        if envelopes is not None and m > 0:
-            env = envelopes[:, np.arange(q) % envelopes.shape[1]].T  # (q, D)
-            cols = cols * (1.0 - m + m * env)
-
         sd = cols.std(axis=1, keepdims=True)
         cols /= np.where(sd > 0, sd, 1.0)
         return cols.T  # (D, q)
 
     def __call__(self, params: dict[str, float],
-                 envelopes: np.ndarray | None = None,
                  project_perp=None) -> ZFactors:
-        U = self._columns("u", params, envelopes)
-        V = self._columns("v", params, envelopes)
+        U = self._columns("u", params)
+        V = self._columns("v", params)
         Vp = project_perp(V) if project_perp is not None else V
         scale = 10.0 ** params["log_amp"] / np.sqrt(self.D * self.cfg.rank)
         return ZFactors(U=U, Vp=Vp, scale=scale)
@@ -186,8 +166,6 @@ def get_generator(D: int, cfg: ZConfig) -> ZGenerator:
 
 
 def generate_Z(params: dict[str, float], D: int, cfg: ZConfig,
-               envelopes: np.ndarray | None = None,
                project_perp=None) -> ZFactors:
     """Build the low-rank free part from named params (cached generator)."""
-    return get_generator(D, cfg)(params, envelopes=envelopes,
-                                 project_perp=project_perp)
+    return get_generator(D, cfg)(params, project_perp=project_perp)

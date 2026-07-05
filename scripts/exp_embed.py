@@ -85,14 +85,27 @@ def main() -> None:
     print(f"personal loss: target {scalar_loss(features(T), w):.3f} "
           f"-> achieved picture {scalar_loss(phi, w):.3f}")
 
+    from playlistviz.sheet import make_sheet
+
     err_map = np.abs(res.achieved - res.target_amp)
     err_map = err_map / max(err_map.max(), 1e-30)
-    P = args.res
-    sheet = Image.new("L", (3 * (P + 10), P + 10), 30)
-    for k, img in enumerate([T, achieved_img, err_map]):
-        sheet.paste(Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), "L"),
-                    (k * (P + 10) + 5, 5))
-    sheet.save(OUT / "side_by_side.png")
+    make_sheet([("target image T", T),
+                ("achieved picture of A", achieved_img),
+                ("|error| (amplified to full range)", err_map)],
+               OUT / "side_by_side.png", tile_size=args.res, cols=3, readme=f"""\
+# exp_embed: any image as the picture of A
+
+What is investigated: whether an arbitrary target image T can be made the
+block-mean picture of the playlist operator without touching playback.
+
+Steps: (1) ES-optimize the 2D target generator against the fitted BT
+weights ({1000 * t_es / hist.evaluations:.0f} ms/eval); (2) embed the winner
+into A's free part via SVD lift (rank {res.rank}); (3) verify.
+
+Results: image relative error {res.rel_error:.2%}; playback error
+{err_play:.2e} (unchanged); personal loss target {scalar_loss(features(T), w):.3f}
+vs achieved {scalar_loss(phi, w):.3f}.
+""")
     print(f"wrote {OUT}/side_by_side.png (target | achieved | error map)")
 
 

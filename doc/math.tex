@@ -1,0 +1,231 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper, margin=2.6cm]{geometry}
+\usepackage{amsmath, amssymb, bm}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage[colorlinks=true, linkcolor=blue!50!black]{hyperref}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\X}{X}
+\newcommand{\Xn}{X_{\mathrm{next}}}
+\newcommand{\Pperp}{P_{\!\perp}}
+\newcommand{\pool}{\Pi}
+\newcommand{\norm}[1]{\lVert #1 \rVert}
+
+\title{\vspace{-1.2em}The Playlist Operator:\\ \large a matrix that plays music, whose picture is an image of your choice}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-3.5em}
+
+\section{What we want to be true}
+
+Take $N$ songs, each a vector of audio samples $x_1,\dots,x_N \in \R^D$
+(here $N=6$, $D \approx 5.5\times 10^5$ at 1\,kHz). We want a single matrix
+$A \in \R^{D\times D}$ that \emph{is} the playlist:
+\begin{equation}
+  A x_n = x_{n+1} \quad (n = 1,\dots,N-1), \qquad A x_N = x_1.
+  \label{eq:playlist}
+\end{equation}
+Feed it any song of the playlist and one matrix--vector product returns the
+next song, forever, cyclically. Stacking the songs as columns of
+$\X = [\,x_1 \cdots x_N\,] \in \R^{D\times N}$ and writing
+$\Xn = [\,x_2, \dots, x_N, x_1\,]$ (columns advanced one step), all $N$
+conditions in \eqref{eq:playlist} become one matrix equation:
+\begin{equation}
+  A\X = \Xn .
+  \label{eq:AX}
+\end{equation}
+
+\paragraph{The key count.} Equation \eqref{eq:AX} imposes $DN$ scalar
+constraints on the $D^2$ entries of $A$. Since $N \ll D$, the solution set is
+a huge affine family: roughly $D^2 - DN \approx D(D-N)$ dimensions of freedom
+remain. \emph{The songs are low rank} --- they span only an $N$-dimensional
+subspace $\mathcal{S} = \operatorname{span}(x_1,\dots,x_N) \subset \R^D$ ---
+so \eqref{eq:AX} pins down how $A$ acts on $\mathcal{S}$ and says
+\emph{nothing} about how it acts on the orthogonal complement
+$\mathcal{S}^\perp$. That freedom is where the artwork lives.
+
+\section{Solving \texorpdfstring{$A\X = \Xn$}{AX = Xnext}, and why \texorpdfstring{$G = \X^\top\X$}{G = XtX} appears}
+
+\paragraph{Coefficients in the song basis.} Given any vector $v \in \R^D$,
+its best approximation inside $\mathcal S$ is a combination $\X c$ with
+coefficients $c \in \R^N$ chosen by least squares:
+\begin{equation}
+  \min_c \norm{\X c - v}^2
+  \;\;\Longrightarrow\;\;
+  \X^\top \X\, c = \X^\top v
+  \;\;\Longrightarrow\;\;
+  c = G^{-1}\X^\top v, \qquad G \equiv \X^\top\X \in \R^{N\times N}.
+  \label{eq:coeffs}
+\end{equation}
+$G$ is the \emph{Gram matrix} of the songs: $G_{ij} = x_i^\top x_j$ collects
+all pairwise song correlations. It is invertible exactly when the songs are
+linearly independent (for real recordings they always are; our measured
+condition number is $1.01$, i.e.\ the songs are nearly orthogonal). The
+operator
+\begin{equation}
+  P \;=\; \X G^{-1}\X^\top \qquad (\text{size } D \times D,\ \text{rank } N)
+\end{equation}
+is the \emph{orthogonal projector onto} $\mathcal S$: it reads a vector,
+computes its song coefficients \eqref{eq:coeffs}, and reassembles the part of
+the vector that lies in song space. Its complement
+\begin{equation}
+  \Pperp \;=\; I - \X G^{-1}\X^\top
+\end{equation}
+keeps only what is orthogonal to every song; in particular
+$\Pperp x_n = 0$ for all $n$.
+
+\paragraph{The minimum-norm solution.} Now solve \eqref{eq:AX}. Try
+$A_0 = \Xn\, G^{-1} \X^\top$ and check it:
+\begin{equation}
+  A_0 \X
+  = \Xn\, \underbrace{G^{-1}\X^\top \X}_{=\;G^{-1}G\;=\;I_N}
+  = \Xn. \qquad \checkmark
+  \label{eq:A0check}
+\end{equation}
+This is why $G^{-1}$ is the essential quantity: it \emph{unmixes} the song
+correlations so that each $x_n$ is mapped to exactly its own successor and
+nothing else. Read $A_0 = \Xn (G^{-1}\X^\top)$ right to left: correlate the
+input against all songs ($\X^\top$), unmix ($G^{-1}$), emit the
+corresponding successors ($\Xn$). $A_0$ is the \emph{smallest} solution (minimum
+Frobenius norm), and it annihilates everything orthogonal to the songs.
+
+\paragraph{The full solution family.} If $A$ and $A'$ both satisfy
+\eqref{eq:AX}, their difference satisfies $(A - A')\X = 0$, i.e.\ it kills
+song space --- which means it can be written as (anything)$\,\times \Pperp$.
+Hence \emph{every} exact playlist operator has the form
+\begin{equation}
+  \boxed{\;A \;=\; A_0 + Z\,\Pperp, \qquad Z \in \R^{D\times D}
+  \text{ completely free}.\;}
+  \label{eq:family}
+\end{equation}
+The free part is invisible to playback: $Z \Pperp x_n = Z\,0 = 0$. Playback
+exactness is enforced \emph{by construction}, not by optimization; our code
+verifies $\max_n \norm{A x_n - x_{n+1}}/\norm{x_{n+1}} \approx 10^{-14}$
+(floating-point roundoff) for every candidate artwork.
+
+\section{Rendering: how a \texorpdfstring{$D\times D$}{DxD} matrix becomes a \texorpdfstring{$P\times P$}{PxP} picture}
+
+$A$ has $D^2 \approx 3\times10^{11}$ entries --- never materialized. It is kept
+in factored form $A = LR^\top$ with
+$L = [\,\Xn G^{-1} \mid U\,]$, $R = [\,\X \mid \Pperp V\,]$ when
+$Z = UV^\top$ is low rank. A $P\times P$ picture must summarize
+$k \times k$ blocks of matrix entries, $k = \lfloor D/P \rfloor$. Define the
+block-pooling operator $\pool \in \R^{P\times D}$ (row $p$ averages samples in
+block $p$). Two natural per-block statistics:
+\begin{align}
+  \text{block mean:}\quad
+  M &= \pool A \pool^\top = (\pool L)(\pool R)^\top
+  && \text{(linear in $A$)} \label{eq:mean}\\
+  \text{block energy:}\quad
+  E_{pq} &= \tfrac1{k^2}\textstyle\sum_{i\in p,\, j\in q} A_{ij}^2
+  = \operatorname{tr}(G_p H_q)
+  && \text{(quadratic in $A$)} \label{eq:energy}
+\end{align}
+with small per-block Gram matrices
+$G_p = \frac1k\sum_{i \in p} L_i^{\vphantom\top} L_i^\top$,
+$H_q = \frac1k\sum_{j \in q} R_j^{\vphantom\top} R_j^\top$
+($L_i$ = $i$-th row of $L$). Both stream through the factors; cost scales
+with pixels, never $D^2$.
+
+\emph{Why two channels?} The matrix is one object; these are two different
+summaries of the same $A$, and the choice is purely presentational. They
+show different things: audio oscillates around zero, so inside any block the
+entries of $A_0$ cancel and its \emph{mean} picture is nearly blank --- but
+their \emph{squares} do not cancel, so the energy picture reveals the
+song-block structure (loudness correlations, silence bands). Conversely, the
+smooth free part $Z$ shows up strongly in the mean channel. For the embedded
+artwork below we display the mean channel: it is the channel that is linear
+in $A$, hence fully controllable.
+
+\section{Making the picture be an image of your choice}
+
+Here is the reframing. Because \eqref{eq:mean} is \emph{linear} in $A$ and
+the free part of $A$ is enormous, the picture is almost unconstrained. Put
+$Z = UV^\top$ (rank $q$) into \eqref{eq:mean}:
+\begin{equation}
+  M \;=\; \underbrace{\pool A_0 \pool^\top}_{M_0\ \text{(fixed by the music)}}
+  \;+\; (\pool U)\,\bigl(\pool\, \Pperp V\bigr)^{\!\top}.
+  \label{eq:Mdecomp}
+\end{equation}
+A $P \times P$ target image $T$ has $P^2$ numbers ($\approx 10^5$); $Z$
+offers $\approx D(D-N) \approx 3\times10^{11}$ free parameters. The counting
+is overwhelmingly favorable --- the constraint is not the image, it is only
+that a rank-$N$ sliver ($\Pperp$) is reserved for the music. Concretely, we
+want to choose $U, V$ such that
+\begin{equation}
+  (\pool U)(\pool \Pperp V)^\top \;=\; T_{\mathrm{amp}} - M_0
+  \;\equiv\; \Delta,
+  \label{eq:embedgoal}
+\end{equation}
+where $T_{\mathrm{amp}}$ is the target after centering and amplitude scaling
+(display is affine-invariant, so this loses nothing).
+
+\paragraph{Step 1: factor the image (SVD).} The truncated singular value
+decomposition
+\begin{equation}
+  \Delta \;\approx\; W_q \Sigma_q Y_q^\top
+  = \bigl(W_q \Sigma_q^{1/2}\bigr)\bigl(Y_q \Sigma_q^{1/2}\bigr)^{\!\top}
+  \;\equiv\; \widetilde U\, \widetilde V^{\top},
+  \qquad \widetilde U, \widetilde V \in \R^{P\times q},
+\end{equation}
+is the best rank-$q$ approximation of the residual image (Eckart--Young).
+Note the SVD's role: it is a \emph{compression} of the target into $q$
+outer products --- nothing about null spaces. Smooth, cloud-like images need
+small $q$; images with sharp lines need larger $q$. (Measured: $0.6\%$ error
+at $q=160$ for a cloud target; up to $9\%$ for crack-network targets at
+$q=220$.)
+
+\paragraph{Step 2: lift pixels to samples.} We need sample-level columns
+$U \in \R^{D\times q}$ whose pooled version is $\widetilde U$, i.e.\
+$\pool U = \widetilde U$. Since $\pool$ averages $k$ samples into one pixel,
+any right inverse works; we use smooth linear interpolation between block
+centers plus one exact piecewise-constant correction, so
+$\pool(\mathrm{lift}(\widetilde U)) = \widetilde U$ holds \emph{exactly}
+while the columns stay smooth. Same for $\widetilde V \to V$.
+
+\paragraph{Step 3: the projection correction (fixed-point iteration).}
+One wrinkle remains: the picture uses $\pool \Pperp V$, not $\pool V$, and
+\begin{equation}
+  \pool \Pperp V = \pool V - \pool \X\, G^{-1} \X^\top V
+\end{equation}
+differs from $\pool V = \widetilde V$ by the pooled shadow of a
+\emph{rank-$N$} term --- small, because generic image columns are nearly
+orthogonal to the $N$ songs, but not zero. We remove it by iterating
+\begin{equation}
+  V \;\leftarrow\; V + \mathrm{lift}\bigl(\widetilde V - \pool \Pperp V\bigr),
+  \label{eq:fixpoint}
+\end{equation}
+which is a classical fixed-point (Richardson) iteration: writing the error
+$e = \widetilde V - \pool\Pperp V$, one step maps
+$e \leftarrow \pool \X G^{-1}\X^\top \mathrm{lift}(e)$, an operator of rank
+$\le N$ and small norm, so the error contracts geometrically; 2--3
+iterations reach sub-percent accuracy. (This is \emph{not} power iteration
+--- power iteration amplifies a dominant eigenvector; here we drive a small
+residual to zero, the same principle as iterative refinement in linear
+solvers.)
+
+\paragraph{Result.} With $U$ and the corrected $\Pperp V$ in
+\eqref{eq:family}, $A$ still plays the playlist exactly (anything through
+$\Pperp$ is inaudible), and its block-mean picture equals the chosen image
+to within the SVD truncation. The aesthetic search then moves entirely into
+ordinary 2D image space: generate candidate images procedurally, score them
+with perceptual metrics whose weights are fitted to the owner by pairwise
+comparison (Bradley--Terry), and embed the winner. The mathematics
+guarantees the two roles never interfere: \emph{the music constrains $A$ on
+an $N$-dimensional subspace; the image lives on the complement.}
+
+\section*{Summary in one line}
+
+\begin{equation*}
+  A = \underbrace{\Xn G^{-1}\X^\top}_{\text{plays the playlist}}
+  + \underbrace{U (\Pperp V)^\top}_{\text{draws the image}},
+  \qquad
+  A x_n = x_{n+1} \ \text{exactly}, \qquad
+  \pool A \pool^\top \approx T .
+\end{equation*}
+
+\end{document}

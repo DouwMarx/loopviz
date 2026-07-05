@@ -19,7 +19,7 @@ from .loss import scalar_loss
 from .metrics import features
 from .operator import PlaylistOperator
 from .render import render
-from .zspace import N_PARAMS, generate_Z, song_envelopes, theta_to_params
+from .zspace import N_PARAMS, generate_Z, theta_to_params
 
 
 @dataclass
@@ -41,12 +41,10 @@ def make_objective(op: PlaylistOperator, w: np.ndarray, zcfg: ZConfig,
                    scalarization: str = "sum",
                    ) -> Callable[[np.ndarray], EvalResult]:
     """Bind the full theta -> loss pipeline for a fixed operator and weights."""
-    env = song_envelopes(op.X)
 
     def objective(theta: np.ndarray) -> EvalResult:
         params = theta_to_params(theta)
-        zf = generate_Z(params, op.D, zcfg, envelopes=env,
-                        project_perp=op.project_perp)
+        zf = generate_Z(params, op.D, zcfg, project_perp=op.project_perp)
         L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
         img = render(L, R, resolution, params, stride=stride)
         phi = features(img)

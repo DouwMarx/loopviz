@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 data/
 runs/
+doc/*.aux
+doc/*.log
+doc/*.out

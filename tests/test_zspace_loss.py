@@ -9,7 +9,7 @@ from playlistviz.metrics import METRIC_NAMES, N_METRICS, TARGETS
 from playlistviz.operator import PlaylistOperator
 from playlistviz.optimize import run_es
 from playlistviz.zspace import (N_PARAMS, PARAM_RANGES, generate_Z,
-                                song_envelopes, theta_to_params)
+                                theta_to_params)
 
 
 # -- zspace ---------------------------------------------------------------
@@ -72,18 +72,9 @@ def test_generate_Z_projected_is_invisible():
     X = rng.standard_normal((800, 6))
     op = PlaylistOperator.from_songs(X)
     params = theta_to_params(rng.standard_normal(N_PARAMS))
-    zf = generate_Z(params, op.D, ZConfig(rank=4), envelopes=song_envelopes(X),
+    zf = generate_Z(params, op.D, ZConfig(rank=4),
                     project_perp=op.project_perp)
     assert op.playback_error(U=zf.U, Vp=zf.Vp, scale=zf.scale) < 1e-8
-
-
-def test_song_envelopes_shape_and_mean():
-    rng = np.random.default_rng(1)
-    X = rng.standard_normal((5000, 3))
-    env = song_envelopes(X, smooth=100)
-    assert env.shape == X.shape
-    assert np.allclose(env.mean(axis=0), 1.0, atol=0.05)
-    assert (env >= 0).all()
 
 
 # -- loss -------------------------------------------------------------------

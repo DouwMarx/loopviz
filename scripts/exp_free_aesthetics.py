@@ -89,6 +89,17 @@ def main() -> None:
         "loss_eq": float(loss_eq),
     }, indent=2))
     kind = "negated (should look BAD)" if args.negate else "unconstrained"
+    (out / "README.md").write_text(f"""\
+# {name}
+
+What is investigated: the aesthetic stack with NO music constraint
+(free factors, no A0, no P_perp) - the reference for what the playlist
+constraint costs visually.{'''
+This run MAXIMIZES the loss (sign flip): if the metrics mean anything,
+the result should look conspicuously bad (it comes out as formless static).''' if args.negate else ''}
+
+Result: L_eq = {loss_eq:.3f} (rank {zcfg.rank}, ES seed {args.seed}).
+""")
     print(f"{kind} L_eq = {loss_eq:.3f}  ->  {out}/presentation.png")
 
 

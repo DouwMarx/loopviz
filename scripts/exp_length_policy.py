@@ -26,7 +26,7 @@ from playlistviz.metrics import features
 from playlistviz.operator import PlaylistOperator
 from playlistviz.optimize import make_objective, run_es
 from playlistviz.render import render, save_png
-from playlistviz.zspace import generate_Z, song_envelopes, theta_to_params
+from playlistviz.zspace import generate_Z, theta_to_params
 
 ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "exp_length_policy"
@@ -48,9 +48,7 @@ def run_policy(policy: str, w: np.ndarray, wavs: list[Path]) -> dict:
     best, _ = run_es(objective, OptConfig(generations=10, population=10, seed=3))
 
     params = theta_to_params(best.theta)
-    env = song_envelopes(op.X)
-    zf = generate_Z(params, op.D, zcfg, envelopes=env,
-                    project_perp=op.project_perp)
+    zf = generate_Z(params, op.D, zcfg, project_perp=op.project_perp)
     L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
     img = render(L, R, min(1024, op.D), params)
     phi = features(img)
@@ -91,11 +89,27 @@ def main() -> None:
 
     if len(policies) == 3:
         from PIL import Image
-        tiles = [Image.open(OUT / f"{p}.png").resize((400, 400)) for p in policies]
-        sheet = Image.new("L", (3 * 410, 400), 30)
-        for k, im in enumerate(tiles):
-            sheet.paste(im.convert("L"), (k * 410, 0))
-        sheet.save(OUT / "side_by_side.png")
+        from playlistviz.sheet import make_sheet
+        tiles = [(f"{r['policy']} (L_personal {r['personal_loss']:.2f})",
+                  np.asarray(Image.open(OUT / f"{r['policy']}.png").convert("L"),
+                             dtype=np.float64) / 255.0)
+                 for r in results]
+        lines = "\n".join(
+            f"- {r['policy']}: D={r['D']}, zeros {r['zero_frac']:.0%}, "
+            f"personal loss {r['personal_loss']:.3f}" for r in results)
+        make_sheet(tiles, OUT / "side_by_side.png", tile_size=400, cols=3, readme=f"""\
+# exp_length_policy: how unequal song lengths become one matrix
+
+What is varied: the length policy only (crop-shortest / pad-longest /
+stretch), at 1 kHz; each variant is ES-optimized in Z-space under the
+fitted BT weights and rendered.
+
+{lines}
+
+Conclusion notes: zero-padding is harmless to the operator (Gram condition
+~1) and its silence regions read as calm zones; stretching alters the audio
+itself and is exact but no longer the original recordings.
+""")
         print(f"\nwrote {OUT}/side_by_side.png ({' | '.join(policies)})")
 
 

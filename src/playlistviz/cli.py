@@ -29,7 +29,7 @@ from .metrics import METRIC_NAMES, N_METRICS, features
 from .operator import PlaylistOperator
 from .optimize import make_objective, run_es
 from .render import render, save_png
-from .zspace import generate_Z, song_envelopes, theta_to_params
+from .zspace import generate_Z, theta_to_params
 
 
 def _paths(args) -> Paths:
@@ -120,8 +120,7 @@ def _optimize_one(op: PlaylistOperator, w: np.ndarray, alpha, cand_id: str,
 
     # re-render the winner at presentation resolution (exact, stride 1)
     params = theta_to_params(best.theta)
-    env = song_envelopes(op.X)
-    zf = generate_Z(params, op.D, zcfg, envelopes=env, project_perp=op.project_perp)
+    zf = generate_Z(params, op.D, zcfg, project_perp=op.project_perp)
     L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
     img = render(L, R, min(rcfg.presentation_resolution, op.D), params)
     phi = features(img)
@@ -205,18 +204,21 @@ def cmd_optimize(args) -> None:
 def _run_embed_job(job: dict) -> tuple[str, float]:
     """Worker: 2D-target ES -> embed winner into the operator -> candidate."""
     from .embed import display, embed_image
-    from .targets import N_PARAMS_2D, generate_target, theta2d_to_params
+    from .targets import (N_PARAMS_2D, apply_family, generate_target,
+                          theta2d_to_params)
 
     paths = Paths(root=Path(job["root"]))
     X, _ = load_matrix(paths.data / "songs.npz")
     op = PlaylistOperator.from_songs(X)
     w = np.asarray(job["w"])
+    family = job["family"]
     ocfg = OptConfig(generations=job["generations"], population=job["population"],
                      seed=job["es_seed"], subspace_rank=0)
 
     def objective(theta):
         from .optimize import EvalResult
-        img = generate_target(theta2d_to_params(theta), 384)
+        params = apply_family(theta2d_to_params(theta), family)
+        img = generate_target(params, 384)
         phi = features(img)
         return EvalResult(theta=theta.copy(),
                           loss=scalar_loss(phi, w, job["scalarization"]), phi=phi)
@@ -225,7 +227,7 @@ def _run_embed_job(job: dict) -> tuple[str, float]:
 
     # regenerate the winner at presentation res (seed-stable) and embed it
     pres = job["embed_res"]
-    T = generate_target(theta2d_to_params(best.theta), pres)
+    T = generate_target(apply_family(theta2d_to_params(best.theta), family), pres)
     res = embed_image(op, T, rank=job["embed_rank"])
     img = display(res.achieved)
     phi = features(img)
@@ -238,6 +240,7 @@ def _run_embed_job(job: dict) -> tuple[str, float]:
     (d / "candidate.json").write_text(json.dumps({
         "id": job["id"],
         "kind": "embed",
+        "family": job["family"],
         "embed_rank": res.rank,
         "embed_rel_error": res.rel_error,
         "es_seed": job["es_seed"],
@@ -281,7 +284,7 @@ def cmd_embed(args) -> None:
                 "es_seed": args.seed + 1000 * idx + 101 * rep,
                 "root": str(paths.root),
                 "generations": args.generations, "population": args.population,
-                "scalarization": args.scalarization,
+                "scalarization": args.scalarization, "family": args.family,
                 "embed_res": args.embed_res, "embed_rank": args.embed_rank,
             })
 
@@ -308,12 +311,14 @@ def cmd_render(args) -> None:
 
     if cand.get("kind") == "embed":
         from .embed import display, embed_image
-        from .targets import generate_target, theta2d_to_params
+        from .targets import apply_family, generate_target, theta2d_to_params
         P = min(args.resolution, op.D)
         rank = min(max(cand["embed_rank"], P // 8), P)
         print(f"re-embedding {args.candidate} at {P}x{P} (rank {rank}), "
               f"{args.bits}-bit...")
-        T = generate_target(theta2d_to_params(np.asarray(cand["theta2d"])), P)
+        params2d = apply_family(theta2d_to_params(np.asarray(cand["theta2d"])),
+                                cand.get("family", "mixed"))
+        T = generate_target(params2d, P)
         res = embed_image(op, T, rank=rank)
         img = display(res.achieved)
         err = op.playback_error(U=res.U, Vp=res.Vp, scale=res.scale)
@@ -325,8 +330,7 @@ def cmd_render(args) -> None:
 
     params = theta_to_params(np.asarray(cand["theta"]))
     zcfg = ZConfig(rank=cand.get("z_rank", ZConfig().rank))
-    env = song_envelopes(op.X)
-    zf = generate_Z(params, op.D, zcfg, envelopes=env, project_perp=op.project_perp)
+    zf = generate_Z(params, op.D, zcfg, project_perp=op.project_perp)
     L, R = op.factors(U=zf.U, Vp=zf.Vp, scale=zf.scale)
     P = min(args.resolution, op.D)
     print(f"rendering {args.candidate} at {P}x{P}, {args.bits}-bit...")
@@ -450,6 +454,10 @@ def main(argv=None) -> None:
     p.add_argument("--replicates", type=int, default=1)
     p.add_argument("--jobs", type=int, default=2,
                    help="parallel workers (embedding is memory-heavy)")
+    p.add_argument("--family", default="cloud",
+                   choices=("cloud", "cells", "mixed"),
+                   help="generator family: nebula/ink (cloud), crack "
+                        "networks (cells), or unconstrained (mixed)")
     p.add_argument("--embed-res", type=int, default=768,
                    help="presentation embed resolution")
     p.add_argument("--embed-rank", type=int, default=220)

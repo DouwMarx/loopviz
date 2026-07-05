@@ -51,6 +51,25 @@ RANGES_2D: dict[str, tuple[float, float]] = {
 PARAM_NAMES_2D = list(RANGES_2D)
 N_PARAMS_2D = len(PARAM_NAMES_2D)
 
+# Generator families: two visually distinct processes, kept separate rather
+# than blended (mixing cell walls into clouds mostly muddies both).
+#   cloud: spectral 1/f synthesis + warp + flow smear -> nebula/ink washes
+#   cells: Worley F2-F1 crack network over a quiet spectral fill -> cell walls
+#   mixed: everything free (exploration only)
+FAMILIES: dict[str, dict[str, float]] = {
+    "cloud": {"worley_mix": 0.0},
+    "cells": {"worley_mix": 0.65, "lic_mix": 0.0, "fig_mix": 0.0},
+    "mixed": {},
+}
+
+
+def apply_family(params: dict[str, float], family: str) -> dict[str, float]:
+    """Pin family-defining parameters; the rest stay free for the optimizer."""
+    if family not in FAMILIES:
+        raise ValueError(f"unknown family {family!r}, expected {list(FAMILIES)}")
+    return {**params, **FAMILIES[family]}
+
+
 _SEEDS = {"base": 101, "second": 202, "warp_x": 303, "warp_y": 404,
           "worley": 505, "comp": 606, "flow": 707}
 
