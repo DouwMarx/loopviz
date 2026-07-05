@@ -80,8 +80,13 @@ def write_candidate(pt, pl, wav, clip, img, w_eq):
     cdir = ROOT / "runs" / cid
     cdir.mkdir(parents=True, exist_ok=True)
     save_png(img, cdir / "presentation.png")
+    manifest_path = ROOT / "data" / "tracks.json"
+    meta = {}
+    if manifest_path.exists():
+        meta = json.loads(manifest_path.read_text()).get(wav.stem, {})
     (cdir / "candidate.json").write_text(json.dumps({
         "id": cid, "kind": "songop", "song": wav.name,
+        "title": meta.get("title", ""), "artist": meta.get("artist", ""),
         "n": pl.n, "N": pl.N, "rho": pl.rho, "f_hz": pl.f,
         "clip_pct": clip, "playback_err": pt["playback_err"],
         "gram_cond": pt["gram_cond"],
