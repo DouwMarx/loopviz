@@ -114,3 +114,45 @@ class TestMatviz:
         make_sheet([("gray", gray_tile), ("rgb", rgb_tile)],
                    tmp_path / "sheet.png", tile_size=40)
         assert (tmp_path / "sheet.png").exists()
+
+
+class TestErrorBudget:
+    def _svd(self):
+        from playlistviz.songmatrix import build, decompose, plan
+        x = synth_signal()
+        pl = plan(4.0, n=64, rho=0.5)
+        op, W = build(x, pl)
+        return decompose(op, W), op
+
+    def test_decompose_reconstructs_exactly(self):
+        from playlistviz.songmatrix import materialize, reconstruct
+        svd, op = self._svd()
+        A0 = materialize(op)
+        assert np.allclose(reconstruct(svd, np.zeros(len(svd.s))), A0,
+                           atol=1e-10)
+
+    def test_attenuation_error_formula_matches_direct(self):
+        from playlistviz.songmatrix import attenuation_errors, reconstruct
+        svd, _ = self._svd()
+        rng = np.random.default_rng(5)
+        a = rng.random(len(svd.s)) * 0.5
+        A = reconstruct(svd, a)
+        WS = np.roll(svd.W, -1, axis=1)          # exact target: A w_k = w_{k+1}
+        direct = np.linalg.norm(A @ svd.W - WS, axis=0)
+        assert np.allclose(attenuation_errors(svd, a), direct, atol=1e-9)
+
+    def test_project_feasible_respects_tol(self):
+        from playlistviz.songmatrix import attenuation_errors, project_feasible
+        svd, _ = self._svd()
+        a = np.ones(len(svd.s))                  # drop everything: way infeasible
+        a_ok, err = project_feasible(svd, a, tol=1e-6)
+        assert err <= 1e-6 * (1 + 1e-12)
+        assert attenuation_errors(svd, a_ok).max() <= 1e-6 * (1 + 1e-12)
+
+    def test_loop_degradation_exact_and_unstable(self):
+        from playlistviz.songmatrix import loop_degradation, materialize
+        svd, op = self._svd()
+        errs = loop_degradation(materialize(op), svd.W, loops=2)
+        assert errs[0] < 1e-4 and errs[1] < 1e-4  # dither-level drift
+        blowup = loop_degradation(2.0 * np.eye(64), svd.W, loops=2)
+        assert blowup == [float("inf")] * 2

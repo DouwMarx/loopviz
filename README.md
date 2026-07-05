@@ -94,6 +94,19 @@ construction. Display modes for the materialized matrix (grayscale,
 diverging palettes, Hinton, bubble, wireframe, 3D bars) live in
 `matviz.py` / `exp_matrix_viz.py`.
 
+An accepted playback error is a third design axis, but a subtle one. The
+SVD of A0 prices any component attenuation in closed form
+(`err_k = sqrt(sum_i (a_i s_i v_i.w_k)^2)`), so a tolerance is a budget —
+but static error is NOT the binding constraint. The exact operator's
+eigenvalues sit on the unit circle (it acts as the cyclic shift on window
+space), so it loops forever; truncation moves eigenvalues off the circle
+and a statically-fine 1e-2 approximation explodes within one pass
+(exp_error_budget). "Faithfully loops" is a spectral-stability condition,
+checked numerically per candidate in the aesthetic ES
+(exp_aesthetic_songop: rho grid x attenuation curve x ink map, equal
+metric weights). Perturbations `Y P_perp` with range(Y) inside window
+space are exact AND provably loop-stable — doc/math.pdf section 5.
+
 ## The math, didactically
 
 `doc/math.pdf` derives everything in ~3 pages: why A_0 = X_next G^{-1} X^T
@@ -210,7 +223,9 @@ scripts/        each writes a README.md into its runs/exp_* output folder
   exp_song_matrix.py      one song as an n x n matrix, 1 entry = 1 pixel
   exp_operator_sizing.py  rank fraction vs conditioning; capacity tables
   exp_matrix_viz.py       display modes for the pixel-exact operator
-tests/          83 tests, no network needed (synthetic songs)
+  exp_error_budget.py     what a playback tolerance buys; loop stability
+  exp_aesthetic_songop.py ES over (rho, attenuation-in-budget, ink map)
+tests/          87 tests, no network needed (synthetic songs)
 ```
 
 ## Setup

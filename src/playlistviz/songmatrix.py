@@ -129,3 +129,79 @@ def materialize(op: PlaylistOperator) -> np.ndarray:
     """The exact n x n matrix A0 (fine at pixel-print sizes, n <~ 4000)."""
     L, R = op.factors()
     return L @ R.T
+
+
+@dataclass(frozen=True)
+class SVDOperator:
+    """A0 = U diag(s) Vt, plus the window overlaps needed to price errors.
+
+    Attenuating component i by a_i (0 = keep, 1 = discard) perturbs the
+    playback of window k by exactly  sum_i a_i s_i (v_i . w_k) u_i, so
+    with C = Vt W the per-window playback error has the closed form
+
+        err_k = sqrt( sum_i (a_i s_i C_ik)^2 )
+
+    (windows are unit-norm, so this is a relative error). It is LINEAR in
+    a global scaling of a - feasibility projection is a single division.
+    """
+
+    U: np.ndarray    # (n, N)
+    s: np.ndarray    # (N,) descending
+    Vt: np.ndarray   # (N, n)
+    C: np.ndarray    # (N, N) = Vt @ W
+    W: np.ndarray    # (n, N) unit-norm windows
+
+
+def decompose(op: PlaylistOperator, W: np.ndarray) -> SVDOperator:
+    """Economy SVD of A0 via QR of its factors (never forms n x n)."""
+    L, R = op.factors()
+    Ql, Rl = np.linalg.qr(L)
+    Qr, Rr = np.linalg.qr(R)
+    u, s, vt = np.linalg.svd(Rl @ Rr.T)
+    U = Ql @ u
+    Vt = vt @ Qr.T
+    return SVDOperator(U=U, s=s, Vt=Vt, C=Vt @ W, W=W)
+
+
+def attenuation_errors(svd: SVDOperator, a: np.ndarray) -> np.ndarray:
+    """Per-window relative playback error of attenuation pattern a."""
+    return np.sqrt(((a * svd.s)[:, None] ** 2 * svd.C ** 2).sum(axis=0))
+
+
+def project_feasible(svd: SVDOperator, a: np.ndarray,
+                     tol: float) -> tuple[np.ndarray, float]:
+    """Scale a down (globally) until max window error <= tol.
+
+    Error is exactly linear in a global scale of a, so the projection is
+    lam = min(1, tol / err). Returns (lam * a, achieved max error).
+    """
+    worst = attenuation_errors(svd, a).max()
+    lam = 1.0 if worst <= tol else tol / worst
+    return lam * a, lam * worst
+
+
+def reconstruct(svd: SVDOperator, a: np.ndarray) -> np.ndarray:
+    """The n x n matrix with components attenuated: U diag((1-a) s) Vt."""
+    return (svd.U * ((1.0 - a) * svd.s)) @ svd.Vt
+
+
+def loop_degradation(A: np.ndarray, W: np.ndarray,
+                     loops: int = 3) -> list[float]:
+    """Relative error vs window 1 after each full pass through the song.
+
+    The exact operator has eigenvalues on the unit circle (it acts as the
+    cyclic shift on window space) so it loops forever without decay; an
+    approximated operator drifts a little every pass. err after loop m ~
+    m * (per-step error) while the drift is small.
+    """
+    N = W.shape[1]
+    x = W[:, 0].copy()
+    errs = []
+    for _ in range(loops):
+        for _ in range(N):
+            x = A @ x
+            if not np.all(np.isfinite(x)) or x @ x > 1e12:
+                # unstable: drift is being amplified exponentially
+                return errs + [float("inf")] * (loops - len(errs))
+        errs.append(float(np.linalg.norm(x - W[:, 0])))
+    return errs

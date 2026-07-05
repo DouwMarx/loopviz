@@ -323,6 +323,90 @@ Because $\mV$ enters the operator only through $\mPp\mV$, playback remains
 exact at every iterate; measured: image error $<1\%$, playback error
 $\sim\!10^{-14}$, simultaneously.
 
+\section{The pixel-exact song print: an error budget, and why looping is
+a stability question}
+
+The second construction drops pooling entirely. One song is cut into $N$
+consecutive windows of $n$ samples, the columns of
+$\mW \in \R^{n \times N}$ (unit-normalised), and the same derivation as
+before gives the cyclic \emph{window-advance} operator
+\begin{equation}
+  \mAo = \mW\mS\,\mG^{-1}\mW^{\top} \in \R^{n\times n},
+  \qquad \mAo\,\bm{w}_k = \bm{w}_{k+1},\quad \mAo\,\bm{w}_N = \bm{w}_1 .
+\end{equation}
+$\mAo$ is $n \times n$ however many windows there are, so with $n$ equal
+to the print side it is displayed \emph{one matrix entry per pixel} ---
+no pooling, nothing to be honest \emph{about}. Every design variable is
+tied together by one count of samples: a song of duration $T$ at sample
+rate $f$ has $fT = Nn = \rho n^2$ samples, where $\rho = N/n$ is the rank
+fraction --- the fraction of the $n^2$ pixels carrying independent audio.
+Hence $n = \sqrt{fT/\rho}$, and at $\rho = 1$ each pixel is worth exactly
+one sample. Real audio never quite reaches $\rho = 1$: adjacent windows
+correlate, $\mG$ degenerates, and (measured) playback survives to
+$\rho \approx 0.95$. Digital silence is a separate, harder wall --- no
+linear map sends $\bm{0}$ to the music that follows it --- cured by an
+inaudible dither floor.
+
+\paragraph{Pricing an error budget.}
+Suppose we accept playback error up to a tolerance $\varepsilon$. What
+freedom does that buy? Take the SVD
+$\mAo = \sum_{i=1}^{N} \sigma_i\, \bm{u}_i \bm{v}_i^{\top}$ and attenuate
+component $i$ by $a_i \in [0,1]$ (so $a_i = 1$ deletes it). The perturbed
+operator sends window $k$ to
+\begin{equation}
+  \mA'\bm{w}_k
+  = \bm{w}_{k+1} - \sum_i a_i \sigma_i \bm{u}_i
+    \bigl(\bm{v}_i^{\top}\bm{w}_k\bigr),
+  \qquad\text{so}\qquad
+  \norm{\mA'\bm{w}_k - \bm{w}_{k+1}}^2
+  = \sum_i a_i^2 \sigma_i^2 \bigl(\bm{v}_i^{\top}\bm{w}_k\bigr)^2
+\end{equation}
+by orthonormality of the $\bm{u}_i$. The cost of any attenuation pattern
+is a closed formula --- no reconstruction needed --- and it is exactly
+linear in a global scaling of $\bm{a}$, so projecting a candidate into
+the budget is a single division. Measured on a real song: $\varepsilon =
+10^{-4}$ buys \emph{no} whole component (the cheapest costs
+$3\times10^{-4}$); $\varepsilon = 10^{-1}$ buys the $366$ smallest of
+$950$ --- which change the picture imperceptibly, because ink is
+dominated by the large-$\sigma$ components.
+
+\paragraph{Why looping is not an error bound.}
+The static price above controls \emph{one} application. Playing the song
+on repeat iterates $\mA$ thousands of times, and there the exact operator
+has a hidden virtue: its column space is the window space (every column
+of $\mAo$ is a combination of shifted windows), and \emph{on} that space
+it acts as the pure cyclic shift $\mS$ in coefficients. Its eigenvalues
+are the $N$-th roots of unity together with $0$ --- all on or inside the
+unit circle --- so nothing grows, ever: the song loops forever. An
+attenuated $\mA'$ loses this: its eigenvalues drift off the circle, and
+any eigenvalue $1+\delta$ multiplies drift by $(1+\delta)^{t}$ over $t$
+steps, amplified further through the operator's gain
+($\sigma_{\max} \sim 3\times10^{3}$). Measured: a truncation with static
+error $10^{-2}$ per window \emph{diverges to overflow within one pass}
+through the song. ``It should faithfully loop'' is therefore a
+\emph{spectral} constraint --- eigenvalues must stay on the unit circle
+--- not a tolerance on single-step error; the optimizer checks a full
+pass numerically for every candidate.
+
+\paragraph{Freedom that provably loops.}
+There is a perturbation family that costs \emph{nothing}, statically or
+dynamically. Split $\R^n$ into window space and its orthogonal
+complement, and add
+\begin{equation}
+  \mA = \mAo + \mY\,\mPp,
+  \qquad \operatorname{range}(\mY) \subseteq \spanof(\bm{w}_1,\dots,\bm{w}_N),
+\end{equation}
+with $\mPp$ the projector onto the complement. Then $\mA\bm{w}_k =
+\bm{w}_{k+1}$ exactly ($\mPp$ kills every window), and in the split basis
+$\mA$ is block upper triangular with the exact shift in one diagonal
+block and $\bm{0}$ in the other --- its eigenvalues are \emph{still} the
+roots of unity and $0$. Exact playback, provably eternal looping, and
+$N(n-N)$ free parameters: at $\rho = 0.95$ about $5\times10^4$, at $\rho
+= 0.5$ about $2.5\times10^5$. The rank fraction $\rho$ is thus the single
+dial trading information density against aesthetic freedom --- the
+playlist artwork of the earlier sections is the extreme low-$\rho$ case,
+the pixel-exact song print the extreme high-$\rho$ case.
+
 \section*{The artwork in one line}
 
 \begin{equation*}
