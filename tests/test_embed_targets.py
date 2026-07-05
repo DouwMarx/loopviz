@@ -37,7 +37,7 @@ def test_target_theta_ranges():
 
 def _neutral():
     return dict(theta2d_to_params(np.zeros(N_PARAMS_2D)),
-                worley_mix=0.0, fig_mix=0.0, lic_mix=0.0,
+                fig_mix=0.0, lic_mix=0.0,
                 warp_amp=0.0, ridge_amount=0.0, gamma=1.0, vignette=0.0)
 
 
@@ -47,14 +47,6 @@ def test_target_beta_controls_smoothness():
     g_s = np.abs(np.diff(generate_target(smooth, 128), axis=0)).mean()
     g_r = np.abs(np.diff(generate_target(rough, 128), axis=0)).mean()
     assert g_s < g_r
-
-
-def test_worley_layer_adds_edges_independent_of_beta():
-    base = dict(_neutral(), beta=3.0)
-    cracked = dict(base, worley_mix=0.7, worley_log_cells=1.5, worley_sharp=8.0)
-    from playlistviz.metrics import edge_density
-    assert edge_density(generate_target(cracked, 256)) > \
-        edge_density(generate_target(base, 256))
 
 
 def test_flow_smear_changes_field():

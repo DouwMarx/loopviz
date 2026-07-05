@@ -204,21 +204,18 @@ def cmd_optimize(args) -> None:
 def _run_embed_job(job: dict) -> tuple[str, float]:
     """Worker: 2D-target ES -> embed winner into the operator -> candidate."""
     from .embed import display, embed_image
-    from .targets import (N_PARAMS_2D, apply_family, generate_target,
-                          theta2d_to_params)
+    from .targets import N_PARAMS_2D, generate_target, theta2d_to_params
 
     paths = Paths(root=Path(job["root"]))
     X, _ = load_matrix(paths.data / "songs.npz")
     op = PlaylistOperator.from_songs(X)
     w = np.asarray(job["w"])
-    family = job["family"]
     ocfg = OptConfig(generations=job["generations"], population=job["population"],
                      seed=job["es_seed"], subspace_rank=0)
 
     def objective(theta):
         from .optimize import EvalResult
-        params = apply_family(theta2d_to_params(theta), family)
-        img = generate_target(params, 384)
+        img = generate_target(theta2d_to_params(theta), 384)
         phi = features(img)
         return EvalResult(theta=theta.copy(),
                           loss=scalar_loss(phi, w, job["scalarization"]), phi=phi)
@@ -227,7 +224,7 @@ def _run_embed_job(job: dict) -> tuple[str, float]:
 
     # regenerate the winner at presentation res (seed-stable) and embed it
     pres = job["embed_res"]
-    T = generate_target(apply_family(theta2d_to_params(best.theta), family), pres)
+    T = generate_target(theta2d_to_params(best.theta), pres)
     res = embed_image(op, T, rank=job["embed_rank"])
     img = display(res.achieved)
     phi = features(img)
@@ -240,7 +237,6 @@ def _run_embed_job(job: dict) -> tuple[str, float]:
     (d / "candidate.json").write_text(json.dumps({
         "id": job["id"],
         "kind": "embed",
-        "family": job["family"],
         "embed_rank": res.rank,
         "embed_rel_error": res.rel_error,
         "es_seed": job["es_seed"],
@@ -267,6 +263,8 @@ def cmd_embed(args) -> None:
     if args.weights:
         w = np.asarray(json.loads(Path(args.weights).read_text())["w_simplex"])
         draws.append(("emb_fitted", w, None))
+    elif args.baseline:
+        draws.append(("emb_uniform", equal_weights(), None))
     else:
         for alpha, n_runs in DEFAULT_SCHEDULE:
             for r in range(n_runs):
@@ -284,7 +282,7 @@ def cmd_embed(args) -> None:
                 "es_seed": args.seed + 1000 * idx + 101 * rep,
                 "root": str(paths.root),
                 "generations": args.generations, "population": args.population,
-                "scalarization": args.scalarization, "family": args.family,
+                "scalarization": args.scalarization,
                 "embed_res": args.embed_res, "embed_rank": args.embed_rank,
             })
 
@@ -311,14 +309,12 @@ def cmd_render(args) -> None:
 
     if cand.get("kind") == "embed":
         from .embed import display, embed_image
-        from .targets import apply_family, generate_target, theta2d_to_params
+        from .targets import generate_target, theta2d_to_params
         P = min(args.resolution, op.D)
         rank = min(max(cand["embed_rank"], P // 8), P)
         print(f"re-embedding {args.candidate} at {P}x{P} (rank {rank}), "
               f"{args.bits}-bit...")
-        params2d = apply_family(theta2d_to_params(np.asarray(cand["theta2d"])),
-                                cand.get("family", "mixed"))
-        T = generate_target(params2d, P)
+        T = generate_target(theta2d_to_params(np.asarray(cand["theta2d"])), P)
         res = embed_image(op, T, rank=rank)
         img = display(res.achieved)
         err = op.playback_error(U=res.U, Vp=res.Vp, scale=res.scale)
@@ -451,13 +447,12 @@ def main(argv=None) -> None:
     p = sub.add_parser("embed", help="candidate sweep via 2D targets + embedding "
                                      "(~50x faster per candidate)")
     p.add_argument("--weights", help="fitted_weights.json to optimize under")
+    p.add_argument("--baseline", action="store_true",
+                   help="uniform weights only (use with --replicates for a "
+                        "seed-diverse pool)")
     p.add_argument("--replicates", type=int, default=1)
     p.add_argument("--jobs", type=int, default=2,
                    help="parallel workers (embedding is memory-heavy)")
-    p.add_argument("--family", default="cloud",
-                   choices=("cloud", "cells", "mixed"),
-                   help="generator family: nebula/ink (cloud), crack "
-                        "networks (cells), or unconstrained (mixed)")
     p.add_argument("--embed-res", type=int, default=768,
                    help="presentation embed resolution")
     p.add_argument("--embed-rank", type=int, default=220)

@@ -81,14 +81,15 @@ the small rank-N P⊥ distortion with fixed-point iterations (`embed.py`).
 Measured: 0.8% image error, playback error unchanged at ~1e-14.
 
 This moves the aesthetic search up a level: optimize a cheap 2D procedural
-generator (`targets.py` — spectral synthesis + domain warp + ridge, plus
-Worley crack, level-set figure/ground, and curl-flow LIC layers from the
-generative-art literature) directly against the metric loss at ~130 ms per
-evaluation, then embed the winner. `playlistviz embed` generates whole
-candidate pools this way, ~50x faster per candidate than ES in Z-space.
-Two generator families are kept deliberately separate (`--family`):
-`cloud` (spectral nebula/ink washes, default) and `cells` (Worley crack
-networks); `mixed` frees everything for exploration. The Z-space path
+generator (`targets.py` — spectral cloud synthesis + domain warp + ridge +
+level-set figure/ground + curl-flow smear) directly against the metric loss
+at ~130 ms per evaluation, then embed the winner. `playlistviz embed`
+generates whole candidate pools this way (~50x faster per candidate than ES
+in Z-space); `--baseline --replicates N` gives a seed-diverse uniform-weight
+pool. A Worley crack-network family existed briefly and was removed: it is
+a categorically different visual process, and category membership is
+largely invisible to the metric feature map, so the BT loop cannot reliably
+vote it out — simpler not to generate it. The Z-space path
 (`playlistviz optimize`) remains as an alternative texture route; Z depends
 only on (seed, theta), never on the audio.
 
@@ -162,18 +163,18 @@ src/playlistviz/
   bt.py         Bradley-Terry fit + D-optimal pair selection
   compare_server.py  stdlib web UI for pairwise choices
   cli.py        the pipeline commands
-  targets.py    2D target generator, families: cloud | cells | mixed
+  targets.py    2D cloud target generator (spectral + warp + figure + flow)
   sheet.py      labeled contact sheets for experiment outputs
   embed.py      embed any image into A's free part (SVD lift + P_perp fixpoint)
 doc/
   math.tex/.pdf didactic derivation of the whole construction
 scripts/        each writes a README.md into its runs/exp_* output folder
   exp_free_aesthetics.py  no-music-constraint baseline; --negate sanity check
-  exp_length_policy.py    crop vs pad vs stretch under fitted weights
-  exp_decompose.py        A0 | Z P_perp | sum, mean and energy channels
+  exp_length_policy.py    A0's own pictures under crop/pad/stretch (no ES)
+  exp_decompose.py        A0 | embedded Z P_perp | sum, mean and energy channels
   exp_embed.py            target -> embedded picture of A, error + playback check
-  exp_families.py         cloud vs cells generator families
-tests/          71 tests, no network needed (synthetic songs)
+  exp_song_matrix.py      one song as an n x n matrix, 1 entry = 1 pixel
+tests/          70 tests, no network needed (synthetic songs)
 ```
 
 ## Setup
