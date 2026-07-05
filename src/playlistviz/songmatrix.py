@@ -185,21 +185,29 @@ def reconstruct(svd: SVDOperator, a: np.ndarray) -> np.ndarray:
     return (svd.U * ((1.0 - a) * svd.s)) @ svd.Vt
 
 
-def loop_degradation(A: np.ndarray, W: np.ndarray,
-                     loops: int = 3) -> list[float]:
+def loop_degradation(A: np.ndarray | tuple[np.ndarray, np.ndarray],
+                     W: np.ndarray, loops: int = 3) -> list[float]:
     """Relative error vs window 1 after each full pass through the song.
 
     The exact operator has eigenvalues on the unit circle (it acts as the
     cyclic shift on window space) so it loops forever without decay; an
     approximated operator drifts a little every pass. err after loop m ~
     m * (per-step error) while the drift is small.
+
+    A may be the dense matrix or the (L, R) factor pair with A = L R^T
+    (cheaper when the matrix is not otherwise needed).
     """
+    if isinstance(A, tuple):
+        L, R = A
+        step = lambda x: L @ (R.T @ x)
+    else:
+        step = lambda x: A @ x
     N = W.shape[1]
     x = W[:, 0].copy()
     errs = []
     for _ in range(loops):
         for _ in range(N):
-            x = A @ x
+            x = step(x)
             if not np.all(np.isfinite(x)) or x @ x > 1e12:
                 # unstable: drift is being amplified exponentially
                 return errs + [float("inf")] * (loops - len(errs))
