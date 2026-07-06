@@ -372,6 +372,13 @@ def cmd_fit(args) -> None:
             continue
         d = json.loads(f.read_text())
         loss_vectors[d["id"]] = loss_vector_from_phi_dict(d["phi"])
+    # comparisons may reference candidates archived since they were made
+    stale = [c for c in comps
+             if c.winner not in loss_vectors or c.loser not in loss_vectors]
+    if stale:
+        comps = [c for c in comps if c not in stale]
+        print(f"skipping {len(stale)} comparisons referencing "
+              f"archived/removed candidates")
     fit = bt.fit_bt(comps, loss_vectors, l2=args.l2)
     se = fit.std_errors()
 
