@@ -449,7 +449,7 @@ def cmd_top(args) -> None:
         print(f"  {d['_score']:7.2f}  {label[:36]:36s} "
               f"f={d.get('f_hz', 0):.0f} n={d.get('n', '?')} "
               f"rho={d.get('rho', 0):.2f} clip={d.get('clip_pct', '?')} "
-              f"horizon {d.get('loop_horizon_years', 0):.0f}yr  [{d['id']}]")
+              f"drift {d.get('loop_drift_per_pass', 0):.0e}  [{d['id']}]")
 
     from PIL import Image
     from .sheet import make_sheet

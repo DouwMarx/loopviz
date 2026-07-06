@@ -103,8 +103,11 @@ explodes within one pass — exp_error_budget), and (b) an ES that was free
 to spend the budget chose not to: within faithful-loop budgets,
 attenuation is cosmetically invisible. So candidates are EXACT only, and
 "loops forever" is structural (eigenvalues on the unit circle by
-construction; the float64 drift per pass is measured and reported as a
-loop horizon per rho). The honest aesthetic parameters are rho, the ink
+construction). Feasibility uses a plain stability margin — measured drift
+per full pass <= 1e-9, i.e. indistinguishable from exact under iteration
+— which is how the conditioning boundary is located per (song, rate);
+it is a safety margin, not a fidelity claim. The honest aesthetic
+parameters are rho, the ink
 map, and the song — enumerated as a grid of comparison candidates by
 exp_songop_pool for pairwise BT preference collection (`playlistviz
 compare`). Crops are banned in all display modes: a crop cannot
