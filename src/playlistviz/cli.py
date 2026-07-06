@@ -453,17 +453,36 @@ def cmd_top(args) -> None:
 
     from PIL import Image
     from .sheet import make_sheet
-    tiles = []
-    for d in top:
-        img = np.asarray(Image.open(paths.runs / d["id"] / "presentation.png"),
-                         dtype=np.float64) / 255.0
-        tiles.append((f"{(d.get('title') or d['id'])[:30]} | "
-                      f"score {d['_score']:.2f} f={d.get('f_hz', 0):.0f} "
-                      f"n={d.get('n', '?')}", img))
-    out = paths.runs / "top_preference.png"
-    make_sheet(tiles, out, tile_size=440, cols=min(5, len(tiles)))
-    print(f"\nsheet: {out} (tiles are downscaled full matrices - open the "
-          f"listed runs/<id>/presentation.png at 100% to judge)")
+
+    def sheet_of(cs, out):
+        tiles = []
+        for d in cs:
+            img = np.asarray(
+                Image.open(paths.runs / d["id"] / "presentation.png"),
+                dtype=np.float64) / 255.0
+            tiles.append((f"{(d.get('title') or d['id'])[:30]} | "
+                          f"score {d['_score']:.2f} f={d.get('f_hz', 0):.0f} "
+                          f"n={d.get('n', '?')} clip={d.get('clip_pct', '?')}",
+                          img))
+        make_sheet(tiles, out, tile_size=440, cols=4)  # 2x4 at n=8
+        return out
+
+    out = sheet_of(top, paths.runs / "top_preference.png")
+    print(f"\nsheet: {out}")
+    if args.per_song:
+        by_song = {}
+        for d in cands:
+            by_song.setdefault(d.get("song", "?"), []).append(d)
+        outdir = paths.runs / "top_by_song"
+        outdir.mkdir(exist_ok=True)
+        for song, cs in sorted(by_song.items()):
+            stem = song.split(".")[0]
+            title = (cs[0].get("title") or stem).replace("/", "-")[:40]
+            sheet_of(cs[:args.n], outdir / f"{stem} {title}.png")
+        print(f"per-song top-{args.n} sheets: {outdir}/ "
+              f"({len(by_song)} songs)")
+    print("(tiles are downscaled full matrices - open the listed "
+          "runs/<id>/presentation.png at 100% to judge)")
 
 
 # -- entry point ---------------------------------------------------------------
@@ -550,9 +569,12 @@ def main(argv=None) -> None:
 
     p = sub.add_parser("top", help="rank candidates under fitted preferences")
     p.add_argument("--weights", default="runs/fitted_weights.json")
-    p.add_argument("-n", type=int, default=10)
+    p.add_argument("-n", type=int, default=8)
     p.add_argument("--per-track", action="store_true",
                    help="best candidate per song instead of overall top")
+    p.add_argument("--per-song", action="store_true",
+                   help="also write a top-n sheet for every song "
+                        "(runs/top_by_song/)")
     p.set_defaults(fn=cmd_top)
 
     args = ap.parse_args(argv)
