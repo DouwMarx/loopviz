@@ -418,6 +418,54 @@ def cmd_report(args) -> None:
         print(f"{d['id']:20s} {alpha_s:>6s} {d['loss_eq']:8.3f}   {tops}")
 
 
+def cmd_top(args) -> None:
+    """Rank the candidate pool under a preference weight vector."""
+    paths = _paths(args)
+    w_path = Path(args.weights)
+    w = np.asarray(json.loads(w_path.read_text())["w_raw"])
+    cands = []
+    for f in sorted(paths.runs.glob("*/candidate.json")):
+        if f.parent.name.startswith("exp_"):
+            continue
+        d = json.loads(f.read_text())
+        d["_score"] = float(w @ loss_vector_from_phi_dict(d["phi"]))
+        cands.append(d)
+    if not cands:
+        raise SystemExit("no candidates yet")
+    cands.sort(key=lambda d: d["_score"])
+    if args.per_track:
+        seen, picks = set(), []
+        for d in cands:
+            if d.get("song") not in seen:
+                seen.add(d.get("song"))
+                picks.append(d)
+        cands = picks
+    top = cands[:args.n]
+
+    print(f"top {len(top)} under {w_path}"
+          + (" (best per track)" if args.per_track else ""))
+    for d in top:
+        label = d.get("title") or d["id"]
+        print(f"  {d['_score']:7.2f}  {label[:36]:36s} "
+              f"f={d.get('f_hz', 0):.0f} n={d.get('n', '?')} "
+              f"rho={d.get('rho', 0):.2f} clip={d.get('clip_pct', '?')} "
+              f"horizon {d.get('loop_horizon_years', 0):.0f}yr  [{d['id']}]")
+
+    from PIL import Image
+    from .sheet import make_sheet
+    tiles = []
+    for d in top:
+        img = np.asarray(Image.open(paths.runs / d["id"] / "presentation.png"),
+                         dtype=np.float64) / 255.0
+        tiles.append((f"{(d.get('title') or d['id'])[:30]} | "
+                      f"score {d['_score']:.2f} f={d.get('f_hz', 0):.0f} "
+                      f"n={d.get('n', '?')}", img))
+    out = paths.runs / "top_preference.png"
+    make_sheet(tiles, out, tile_size=440, cols=min(5, len(tiles)))
+    print(f"\nsheet: {out} (tiles are downscaled full matrices - open the "
+          f"listed runs/<id>/presentation.png at 100% to judge)")
+
+
 # -- entry point ---------------------------------------------------------------
 
 def main(argv=None) -> None:
@@ -499,6 +547,13 @@ def main(argv=None) -> None:
 
     p = sub.add_parser("report", help="common-yardstick candidate table")
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("top", help="rank candidates under fitted preferences")
+    p.add_argument("--weights", default="runs/fitted_weights.json")
+    p.add_argument("-n", type=int, default=10)
+    p.add_argument("--per-track", action="store_true",
+                   help="best candidate per song instead of overall top")
+    p.set_defaults(fn=cmd_top)
 
     args = ap.parse_args(argv)
     args.fn(args)
