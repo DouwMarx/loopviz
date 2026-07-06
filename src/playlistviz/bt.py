@@ -74,12 +74,21 @@ def _design_matrix(comparisons: list[Comparison],
 
 
 def fit_bt(comparisons: list[Comparison], loss_vectors: dict[str, np.ndarray],
-           l2: float = 1.0, n_metrics: int = N_METRICS) -> BTFit:
-    """MAP fit of w. Prior: w ~ Normal(uniform, 1/(2*l2) I)."""
+           l2: float = 1.0, n_metrics: int | None = None,
+           prior_mean: np.ndarray | None = None) -> BTFit:
+    """MAP fit of w. Prior: w ~ Normal(prior_mean, 1/(2*l2) I).
+
+    Feature dimension is inferred from the loss vectors (they may carry
+    extra non-metric features, e.g. generation knobs, appended after the
+    metric losses). Default prior mean: uniform 1/M over all features.
+    """
     if not comparisons:
         raise ValueError("no comparisons to fit")
     X = _design_matrix(comparisons, loss_vectors)  # (C, M); w.X > 0 = correct order
-    w0 = np.full(n_metrics, 1.0 / n_metrics)
+    if n_metrics is None:
+        n_metrics = X.shape[1]
+    w0 = (np.asarray(prior_mean, dtype=float) if prior_mean is not None
+          else np.full(n_metrics, 1.0 / n_metrics))
 
     def nlp(w):
         z = X @ w
