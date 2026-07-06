@@ -68,8 +68,7 @@ def cmd_download(args) -> None:
                   if ln.strip() and not ln.strip().startswith("#")]
     if not links:
         raise SystemExit("no links given (--link, --links-file or --csv)")
-    cfg = AudioConfig()
-    download(links, paths.audio, cfg.sample_rate)
+    download(links, paths.audio, args.sample_rate)
     if manifest is not None:
         (paths.data / "tracks.json").write_text(json.dumps(manifest, indent=2))
         print(f"wrote {paths.data}/tracks.json ({len(manifest)} tracks)")
@@ -506,6 +505,9 @@ def main(argv=None) -> None:
     p.add_argument("--csv", help="track CSV (issue,song_title,artist,album,"
                                  "link,link_status,notes); broken rows "
                                  "skipped; writes data/tracks.json manifest")
+    p.add_argument("--sample-rate", type=int, default=16000,
+                   help="storage rate of the wavs; sets the ceiling for "
+                        "the operator's implied rate f")
     p.set_defaults(fn=cmd_download)
 
     p = sub.add_parser("build", help="build song matrix X and verify the operator")

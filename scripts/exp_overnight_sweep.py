@@ -38,8 +38,9 @@ from playlistviz.songmatrix import (Plan, build, load_audio, loop_degradation,
 
 ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "exp_overnight_sweep"
-FREQS = (4000.0, 6000.0, 3000.0, 5000.0, 8000.0)   # preference-ordered
-CLIPS = (99.3, 99.5, 99.7)
+FREQS = (8000.0, 10000.0, 12000.0, 6000.0, 5000.0)  # preference-ordered
+CLIPS = (99.5, 99.7, 99.9)
+TIGHT_TOL = 1e-7   # relaxed-margin bisection -> the denser second variant
 
 
 def probe(signal, T, f, n):
@@ -132,21 +133,27 @@ def main() -> None:
                     audio_cache[wav.stem] = load_audio([wav])
                 signal, T = audio_cache[wav.stem]
 
-                if key not in state:
-                    n_min, why = smallest_feasible_n(signal, T, f,
-                                                     args.n_max, tol)
-                    state[key] = {"n_min": n_min, "why": why, "T": T}
-                    state_path.write_text(json.dumps(state, indent=2))
-                cell = state[key]
-                if cell["n_min"] is None:
-                    print(f"{wav.stem} f={f:.0f}: infeasible ({cell['why']})")
+                variants = []
+                for vt in (TIGHT_TOL, tol):   # denser first, then margin
+                    vkey = f"{key}|{vt:.0e}"
+                    if vkey not in state:
+                        n_v, why = smallest_feasible_n(signal, T, f,
+                                                       args.n_max, vt)
+                        state[vkey] = {"n_min": n_v, "why": why, "T": T}
+                        state_path.write_text(json.dumps(state, indent=2))
+                    if state[vkey]["n_min"] is not None:
+                        variants.append((state[vkey]["n_min"], vt))
+                if not variants:
+                    print(f"{wav.stem} f={f:.0f}: infeasible "
+                          f"({state[f'{key}|{tol:.0e}']['why']})")
                     skipped += 1
                     continue
-
-                n_min = cell["n_min"]
-                n_variants = sorted({n_min,
-                                     min(args.n_max, round(n_min * 1.18))})
-                for n in n_variants:
+                # dedup by n; when both margins land on the same n, verify
+                # against the looser one (the point passed both bisections)
+                by_n = {}
+                for n_v, vt in variants:
+                    by_n[n_v] = max(by_n.get(n_v, 0.0), vt)
+                for n, vtol in sorted(by_n.items()):
                     todo = [c for c in CLIPS if not (
                         ROOT / "runs" /
                         f"songop_t{wav.stem}_f{f:.0f}_n{n}_c{c:.1f}" /
@@ -154,9 +161,9 @@ def main() -> None:
                     if not todo:
                         continue
                     pt, pl, op = probe(signal, T, f, n)
-                    if pt["drift_per_pass"] > tol:  # resonance dip at this n
+                    if pt["drift_per_pass"] > vtol:  # resonance dip at this n
                         print(f"{wav.stem} f={f:.0f} n={n}: drift "
-                              f"{pt['drift_per_pass']:.1e} > {tol:.0e} - skip")
+                              f"{pt['drift_per_pass']:.1e} > {vtol:.0e} - skip")
                         continue
                     A0 = materialize(op)
                     for clip in todo:
