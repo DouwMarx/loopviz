@@ -1,9 +1,11 @@
-"""Aesthetic feature map phi: grayscale image -> R^11.
+"""Aesthetic feature map phi: grayscale image -> R^12.
 
-Seven structural metrics from the aesthetic-optimization spec plus four
+Seven structural metrics from the aesthetic-optimization spec, four
 literature-backed additions (edge-orientation entropy, compression
-complexity, luminance skewness, center-of-mass balance). Color metrics were
-removed with color rendering. Each metric has a population target t and a
+complexity, luminance skewness, center-of-mass balance), and one
+construction-specific one (moire salience: strength of the periodic
+interference patterns the window-advance operator produces). Color
+metrics were removed with color rendering. Each metric has a population target t and a
 normalization scale s; per-metric loss is ((phi - t)/s)^2.
 
 Measurement is two-scale (image and its 2x block-downsample averaged) to
@@ -38,6 +40,7 @@ METRICS: list[MetricSpec] = [
     MetricSpec("compress_complexity", 0.50, 0.20, "Forsythe 2011 inverted-U midpoint"),
     MetricSpec("lum_skewness", 0.0, 0.6, "Graham/Redies: art has ~0 luminance skew"),
     MetricSpec("balance_dcm", 0.05, 0.08, "Hubner/Fillinger DCM ~ -0.84 with liking"),
+    MetricSpec("moire_salience", 1.5, 1.0, "spectral peak over annular median: moire/interference strength"),
 ]
 
 METRIC_NAMES = [m.name for m in METRICS]
@@ -189,6 +192,46 @@ def balance_dcm(L: np.ndarray) -> float:
     return float(dist / (0.5 * np.hypot(h, wd)))
 
 
+def moire_salience(L: np.ndarray) -> float:
+    """Log10 salience of the strongest off-DC peak in the whitened spectrum.
+
+    Periodic interference (weave, pitch diagonals) concentrates power in
+    isolated 2D-spectral peaks. Dividing each bin by the median power at
+    its radius removes the 1/f^beta envelope, so max(whitened) is
+    peak-over-background: white noise floors near log10(ln Nbins) ~ 1.2,
+    strong moire reaches 3-5.
+    """
+    n = min(L.shape)
+    if n < 64:
+        return 0.0
+    Lc = L[:n, :n] - L[:n, :n].mean()
+    win = np.hanning(n)
+    power = np.abs(np.fft.fftshift(np.fft.fft2(Lc * np.outer(win, win)))) ** 2
+    yy, xx = np.mgrid[0:n, 0:n]
+    dy, dx = yy - n / 2, xx - n / 2
+    r = np.hypot(dy, dx).astype(int).ravel()
+    # off-DC, inside the Nyquist circle, and off the u/v axes (window
+    # leakage from any smooth gradient lands exactly on the axes)
+    keep = ((r >= 4) & (r <= n // 2)
+            & (np.abs(dy.ravel()) > 2) & (np.abs(dx.ravel()) > 2))
+    p = power.ravel()
+    r, p = r[keep], p[keep]
+    order = np.argsort(r, kind="stable")
+    r, p = r[order], p[order]
+    bounds = np.searchsorted(r, np.arange(r[0], r[-1] + 2))
+    # floor the ring background at 1% of the mean bin power: rings in the
+    # numerically dead tail of a smooth spectrum otherwise produce huge
+    # ratios out of rounding noise no eye can see
+    floor = 1e-2 * p.mean()
+    salience = 1.0
+    for i in range(len(bounds) - 1):
+        ring = p[bounds[i]:bounds[i + 1]]
+        if ring.size < 16:
+            continue
+        salience = max(salience, ring.max() / max(np.median(ring), floor))
+    return float(np.log10(salience))
+
+
 # -- feature map ---------------------------------------------------------------
 
 def features_single(L: np.ndarray) -> np.ndarray:
@@ -205,6 +248,7 @@ def features_single(L: np.ndarray) -> np.ndarray:
         compress_complexity(L),
         lum_skewness(L),
         balance_dcm(L),
+        moire_salience(L),
     ])
 
 
