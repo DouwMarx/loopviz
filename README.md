@@ -94,6 +94,47 @@ construction. Display modes for the materialized matrix (grayscale,
 diverging palettes, Hinton, bubble, wireframe, 3D bars) live in
 `matviz.py` / `exp_matrix_viz.py`.
 
+An example, straight from the print queue — "The World Breathes with Me"
+(Caligula's Horse) as the exact 1638 x 1638 operator that plays it
+(f = 4130 Hz, rho = 0.32, clip 99.5, an A2 print at 0.25 mm/entry). The
+horizontal weave is the song's pitch content interfering with the window
+length; every pixel is one matrix entry:
+
+![The World Breathes with Me as its own playback operator](doc/example_the-world-breathes-with-me.png)
+
+## Choosing the print palette
+
+The grayscale render encodes the signed matrix as one luminance axis
+(mid-gray = 0), so recoloring the render is exactly recoloring the matrix.
+`playlistviz palette [candidate]` launches an interactive viewer to pick a
+diverging scheme and see it on the actual render. With no argument it opens
+your highest-rated candidate (by fitted preference weights if you have run
+`fit`, else the equal-weight yardstick):
+
+- default schemes: ~30 presets in grouped menus - 16 OKLab-designed and
+  tuned to print faithfully (dark-field, paper-field, muted), plus sourced
+  stock maps for comparison: ColorBrewer colour-blind-safe diverging
+  (RdBu/BrBG/PuOr/PRGn/PiYG/RdYlBu, colorbrewer2.org), Crameri
+  perceptually-uniform maps bundled in matplotlib (berlin/managua/vanimo,
+  fabiocrameri.ch), and classics (coolwarm/Spectral/...). Each carries a
+  live print verdict, so the honestly-printable ones stand out from the
+  saturated screen maps.
+- design your own: six OKLab knobs - `hue_neg`/`hue_pos` (the two accent
+  hues), `L_center`/`L_end` (field-vs-accent lightness; the center owns ~95%
+  of the print), `C_end` (accent chroma), `drift` (per-arm hue rotation,
+  berlin-like richness).
+
+Every palette is checked for printability, not assumed: the sRGB gamut
+(hard) and, when a CMYK ICC profile is found (`PLAYLISTVIZ_CMYK_ICC` or
+auto-discovered), a coated-offset soft-proof (FOGRA39) reporting the fraction
+of the ramp outside the print gamut. The designed presets are tuned to the
+coated medium (dark field at the OKLab L~0.20 black floor, chroma inside
+CMYK); saturated screen maps like coolwarm correctly flag as out of gamut.
+Saving writes a reproducible config (spec + source hash + gamut + git commit)
+and a preview; `playlistviz palette <candidate> --apply <config>.json`
+re-renders it exactly. The engine is `palette.py`; the viewer is
+`palette_server.py`.
+
 An accepted playback error was investigated as a third design axis and
 REJECTED. The SVD of A0 prices any component attenuation in closed form
 (`err_k = sqrt(sum_i (a_i s_i v_i.w_k)^2)`), so a tolerance is a budget —
@@ -120,30 +161,7 @@ with range(Y) inside window space would be exact AND provably loop-stable
 `doc/math.pdf` derives everything in ~3 pages: why A_0 = X_next G^{-1} X^T
 solves A X = X_next (the Gram matrix G unmixes song correlations), why the
 full solution family is A_0 + Z P_perp, how the block-mean/block-energy
-pictures stream through the factors, and how an arbitrary image is embedded
-(SVD compression + pooling-exact lift + rank-N fixed-point correction).
-
-## Embedding: the picture of A can be (almost) any image
-
-The block-mean picture of A is linear in Z: `M = M0 + pool(U)·pool(P⊥V)ᵀ`.
-A P×P image has P² numbers; Z has ~D² free dimensions. So any square
-grayscale target T is reachable: SVD the residual `T_amp − M0`, lift the
-pixel-level singular vectors to sample level (pooling-consistent), absorb
-the small rank-N P⊥ distortion with fixed-point iterations (`embed.py`).
-Measured: 0.8% image error, playback error unchanged at ~1e-14.
-
-This moves the aesthetic search up a level: optimize a cheap 2D procedural
-generator (`targets.py` — spectral cloud synthesis + domain warp + ridge +
-level-set figure/ground + curl-flow smear) directly against the metric loss
-at ~130 ms per evaluation, then embed the winner. `playlistviz embed`
-generates whole candidate pools this way (~50x faster per candidate than ES
-in Z-space); `--baseline --replicates N` gives a seed-diverse uniform-weight
-pool. A Worley crack-network family existed briefly and was removed: it is
-a categorically different visual process, and category membership is
-largely invisible to the metric feature map, so the BT loop cannot reliably
-vote it out — simpler not to generate it. The Z-space path
-(`playlistviz optimize`) remains as an alternative texture route; Z depends
-only on (seed, theta), never on the audio.
+pictures stream through the factors.
 
 ## The free part Z (what the Z-space optimizer shapes)
 
@@ -162,12 +180,12 @@ window(t) * noise(t)
 All theta-independent randomness is cached (`ZGenerator`); one theta
 evaluation costs a batched irfft plus elementwise work.
 
-## Aesthetic metrics (11, grayscale)
+## Aesthetic metrics (12, grayscale)
 
 Seven structural metrics from the aesthetic-optimization spec (spectral
 slope β→2.0, fractal D→1.4, luminance entropy→5 bits, edge density→0.08,
 gradient Gini→0.75, mirror symmetry→0.3, RMS contrast→0.2) plus four added
-after a literature review:
+after a literature review and one construction-specific one:
 
 | metric | source | target |
 |---|---|---|
@@ -175,6 +193,7 @@ after a literature review:
 | compression complexity | Forsythe et al. 2011 — zlib ratio | 0.50 |
 | luminance skewness | Graham & Redies 2010 | 0.0 |
 | balance (DCM) | Hübner & Fillinger 2016 | 0.05 |
+| moiré salience | log peak of the annular-median-whitened 2D spectrum: strength of the pitch-interference weave/diagonals the operator produces (noise floor ~1.3, strong weave 4–6) | 1.5 |
 
 Weight-independent barriers (contrast floor, entropy floor) guard against
 reward hacking. Measurement is two-scale (image + 2x downsample). Targets
@@ -209,26 +228,25 @@ src/playlistviz/
   operator.py   factored A0, P_perp, playback verification
   zspace.py     theta -> low-rank Z (localized spectral columns), cached
   render.py     factored block-mean / block-energy images, tone curve, 16-bit gray PNG
-  metrics.py    the 11-metric feature map, two-scale
+  metrics.py    the 12-metric feature map, two-scale
   loss.py       weighted / Chebyshev loss, barriers, Dirichlet sampling
   optimize.py   (1+lambda)-ES, optional low-rank search subspace
   bt.py         Bradley-Terry fit + D-optimal pair selection
   compare_server.py  stdlib web UI for pairwise choices
   cli.py        the pipeline commands
-  targets.py    2D cloud target generator (spectral + warp + figure + flow)
   sheet.py      labeled contact sheets for experiment outputs
-  embed.py      embed any image into A's free part (SVD lift + P_perp fixpoint)
   songmatrix.py one song as an n x n operator: sizing math, dither, build,
                 SVD error pricing, loop-degradation measurement
   matviz.py     full-matrix display modes (gray, diverging, hinton, bubble,
                 wireframe) - every entry shown, crops banned
+  palette.py    OKLab diverging-palette engine + printability (sRGB gamut,
+                CMYK soft-proof), presets, reproducible config IO
+  palette_server.py  interactive palette designer web UI (playlistviz palette)
 doc/
   math.tex/.pdf didactic derivation of the whole construction
 scripts/        each writes a README.md into its runs/exp_* output folder
   exp_free_aesthetics.py  no-music-constraint baseline; --negate sanity check
   exp_length_policy.py    A0's own pictures under crop/pad/stretch (no ES)
-  exp_decompose.py        A0 | embedded Z P_perp | sum, mean and energy channels
-  exp_embed.py            target -> embedded picture of A, error + playback check
   exp_song_matrix.py      one song as an n x n matrix, 1 entry = 1 pixel
   exp_operator_sizing.py  rank fraction vs conditioning; capacity tables
   exp_matrix_viz.py       display modes for the pixel-exact operator
