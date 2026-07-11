@@ -28,6 +28,7 @@ from .loss import (DEFAULT_SCHEDULE, equal_weights, loss_vector,
 from .metrics import METRIC_NAMES, N_METRICS, features
 from .operator import PlaylistOperator
 from .optimize import make_objective, run_es
+from .pool import candidate_dir, iter_candidate_files
 from .render import render, save_png
 from .zspace import generate_Z, theta_to_params
 
@@ -217,128 +218,13 @@ def cmd_optimize(args) -> None:
         print(f"  {cand_id:20s} L_eq = {loss_eq:.3f}")
 
 
-def _run_embed_job(job: dict) -> tuple[str, float]:
-    """Worker: 2D-target ES -> embed winner into the operator -> candidate."""
-    from .embed import display, embed_image
-    from .targets import N_PARAMS_2D, generate_target, theta2d_to_params
-
-    paths = Paths(root=Path(job["root"]))
-    X, _ = load_matrix(paths.data / "songs.npz")
-    op = PlaylistOperator.from_songs(X)
-    w = np.asarray(job["w"])
-    ocfg = OptConfig(generations=job["generations"], population=job["population"],
-                     seed=job["es_seed"], subspace_rank=0)
-
-    def objective(theta):
-        from .optimize import EvalResult
-        img = generate_target(theta2d_to_params(theta), 384)
-        phi = features(img)
-        return EvalResult(theta=theta.copy(),
-                          loss=scalar_loss(phi, w, job["scalarization"]), phi=phi)
-
-    best, _ = run_es(objective, ocfg, n_params=N_PARAMS_2D)
-
-    # regenerate the winner at presentation res (seed-stable) and embed it
-    pres = job["embed_res"]
-    T = generate_target(theta2d_to_params(best.theta), pres)
-    res = embed_image(op, T, rank=job["embed_rank"])
-    img = display(res.achieved)
-    phi = features(img)
-    loss_eq = scalar_loss(phi, equal_weights())
-    err = op.playback_error(U=res.U, Vp=res.Vp, scale=res.scale)
-
-    d = paths.runs / job["id"]
-    d.mkdir(parents=True, exist_ok=True)
-    save_png(img, d / "presentation.png")
-    (d / "candidate.json").write_text(json.dumps({
-        "id": job["id"],
-        "kind": "embed",
-        "embed_rank": res.rank,
-        "embed_rel_error": res.rel_error,
-        "es_seed": job["es_seed"],
-        "alpha": job["alpha"],
-        "weights": list(map(float, w)),
-        "theta2d": list(map(float, best.theta)),
-        "theta": [],
-        "phi": {n: float(v) for n, v in zip(METRIC_NAMES, phi)},
-        "loss_vector": list(map(float, loss_vector(phi))),
-        "loss_eq": float(loss_eq),
-    }, indent=2))
-    print(f"[{job['id']}] done. L_eq = {loss_eq:.3f}, "
-          f"embed err {res.rel_error:.2%}, playback error = {err:.2e}")
-    return job["id"], loss_eq
-
-
-def cmd_embed(args) -> None:
-    """Candidate sweep via the fast path: 2D-target ES + embedding."""
-    paths = _paths(args)
-    _load_operator(paths)  # fail fast
-    rng = np.random.default_rng(args.seed)
-
-    draws: list[tuple[str, np.ndarray, object]] = []
-    if args.weights:
-        w = np.asarray(json.loads(Path(args.weights).read_text())["w_simplex"])
-        draws.append(("emb_fitted", w, None))
-    elif args.baseline:
-        draws.append(("emb_uniform", equal_weights(), None))
-    else:
-        for alpha, n_runs in DEFAULT_SCHEDULE:
-            for r in range(n_runs):
-                tag = "inf" if np.isinf(alpha) else f"{alpha:g}"
-                cand_id = f"emb_a{tag}_r{r}" if not np.isinf(alpha) else "emb_baseline"
-                a = None if np.isinf(alpha) else alpha
-                draws.append((cand_id, sample_weights(alpha, rng), a))
-
-    jobs = []
-    for idx, (cand_id, w, alpha) in enumerate(draws):
-        for rep in range(args.replicates):
-            full_id = cand_id if args.replicates == 1 else f"{cand_id}_s{rep}"
-            jobs.append({
-                "id": full_id, "w": list(map(float, w)), "alpha": alpha,
-                "es_seed": args.seed + 1000 * idx + 101 * rep,
-                "root": str(paths.root),
-                "generations": args.generations, "population": args.population,
-                "scalarization": args.scalarization,
-                "embed_res": args.embed_res, "embed_rank": args.embed_rank,
-            })
-
-    print(f"{len(jobs)} embed runs ({args.jobs} parallel jobs)")
-    if args.jobs > 1:
-        import concurrent.futures as cf
-        with cf.ProcessPoolExecutor(max_workers=args.jobs) as ex:
-            results = list(ex.map(_run_embed_job, jobs))
-    else:
-        results = [_run_embed_job(j) for j in jobs]
-
-    print("\ncommon yardstick (equal-weight loss):")
-    for cand_id, loss_eq in sorted(results, key=lambda t: t[1]):
-        print(f"  {cand_id:22s} L_eq = {loss_eq:.3f}")
-
-
 def cmd_render(args) -> None:
     paths = _paths(args)
     op = _load_operator(paths)
-    cand_file = paths.runs / args.candidate / "candidate.json"
-    if not cand_file.exists():
+    cdir = candidate_dir(paths.runs, args.candidate)
+    if cdir is None:
         raise SystemExit(f"no candidate {args.candidate} in {paths.runs}")
-    cand = json.loads(cand_file.read_text())
-
-    if cand.get("kind") == "embed":
-        from .embed import display, embed_image
-        from .targets import generate_target, theta2d_to_params
-        P = min(args.resolution, op.D)
-        rank = min(max(cand["embed_rank"], P // 8), P)
-        print(f"re-embedding {args.candidate} at {P}x{P} (rank {rank}), "
-              f"{args.bits}-bit...")
-        T = generate_target(theta2d_to_params(np.asarray(cand["theta2d"])), P)
-        res = embed_image(op, T, rank=rank)
-        img = display(res.achieved)
-        err = op.playback_error(U=res.U, Vp=res.Vp, scale=res.scale)
-        print(f"embed rel error {res.rel_error:.2%}, playback error {err:.2e}")
-        out = paths.runs / args.candidate / f"print_{P}.png"
-        save_png(img, out, bit_depth=args.bits)
-        print(f"wrote {out}")
-        return
+    cand = json.loads((cdir / "candidate.json").read_text())
 
     params = theta_to_params(np.asarray(cand["theta"]))
     zcfg = ZConfig(rank=cand.get("z_rank", ZConfig().rank))
@@ -347,7 +233,7 @@ def cmd_render(args) -> None:
     P = min(args.resolution, op.D)
     print(f"rendering {args.candidate} at {P}x{P}, {args.bits}-bit...")
     img = render(L, R, P, params)
-    out = paths.runs / args.candidate / f"print_{P}.png"
+    out = cdir / f"print_{P}.png"
     save_png(img, out, bit_depth=args.bits)
     print(f"wrote {out}")
 
@@ -358,6 +244,68 @@ def cmd_compare(args) -> None:
     serve(paths.runs, paths.comparisons, port=args.port)
 
 
+def _resolve_source(paths: Paths, target: str) -> tuple[Path, Path, str]:
+    """(source image, config out-dir, source id) for a candidate id or a path.
+
+    A bare candidate id resolves to runs/<id>/presentation.png with configs
+    written to runs/<id>/palettes/; a direct image path writes configs beside
+    it under <image_dir>/palettes/.
+    """
+    p = Path(target)
+    if p.exists() and p.is_file():
+        return p, p.parent / "palettes", p.stem
+    cdir = candidate_dir(paths.runs, target)
+    if cdir is None or not (cdir / "presentation.png").exists():
+        raise SystemExit(f"no image at {p} and no candidate "
+                         f"{target} in {paths.runs}")
+    return cdir / "presentation.png", cdir / "palettes", target
+
+
+def _best_candidate(paths: Paths) -> str:
+    """Highest-rated candidate id: ranked by fitted preference weights if
+    available (runs/fitted_weights.json, lower w.loss is better, matching
+    `top`), else by the equal-weight yardstick (lower loss_eq, matching
+    `report`)."""
+    cands = []
+    for f in iter_candidate_files(paths.runs):
+        if not (f.parent / "presentation.png").exists():
+            continue
+        cands.append(json.loads(f.read_text()))
+    if not cands:
+        raise SystemExit("no rated candidates in runs/ - run a sweep first, "
+                         "or pass a candidate id / image path")
+    w_path = paths.runs / "fitted_weights.json"
+    if w_path.exists():
+        score = bt.scorer_from_weights(json.loads(w_path.read_text()))
+        def key(d):
+            return score(d["phi"])
+        basis = "fitted preference model"
+    else:
+        def key(d):
+            return d["loss_eq"]
+        basis = "equal-weight yardstick (no fitted_weights.json yet)"
+    best = min(cands, key=key)
+    print(f"most-rated candidate: {best['id']} (by {basis})")
+    return best["id"]
+
+
+def cmd_palette(args) -> None:
+    from . import palette
+    paths = _paths(args)
+    target = args.target or _best_candidate(paths)
+    source, out_dir, source_id = _resolve_source(paths, target)
+
+    if args.apply:  # non-interactive: reproduce a saved recolor
+        out = Path(args.out) if args.out else source.with_name(
+            f"{source.stem}_{Path(args.apply).stem}.png")
+        palette.apply_config(Path(args.apply), source, out)
+        print(f"wrote {out}")
+        return
+
+    from .palette_server import serve
+    serve(source, out_dir, source_id=source_id, port=args.port)
+
+
 def cmd_fit(args) -> None:
     paths = _paths(args)
     comps = bt.load_comparisons(paths.comparisons)
@@ -366,9 +314,7 @@ def cmd_fit(args) -> None:
     # loss vectors are rebuilt from stored phi (by metric name) so candidates
     # saved under older metric sets stay usable
     loss_vectors = {}
-    for f in sorted(paths.runs.glob("*/candidate.json")):
-        if f.parent.name.startswith("exp_"):
-            continue
+    for f in iter_candidate_files(paths.runs):
         d = json.loads(f.read_text())
         loss_vectors[d["id"]] = loss_vector_from_phi_dict(d["phi"])
     # comparisons may reference candidates archived since they were made
@@ -390,6 +336,22 @@ def cmd_fit(args) -> None:
         print(f"  {METRIC_NAMES[i]:22s} {fit.w_raw[i]:8.3f} {se[i]:8.3f} "
               f"{fit.w_simplex[i]:10.3f}{flag}")
 
+    # quadratic-interaction utility: fitted per-metric optima + pairwise
+    # interactions; this is the model used for ranking (scorer_from_weights)
+    phi_vecs = {}
+    for f in iter_candidate_files(paths.runs):
+        d = json.loads(f.read_text())
+        phi_vecs[d["id"]] = np.array([d["phi"][n] for n in METRIC_NAMES])
+    quad = bt.quad_fit(comps, phi_vecs, l2=args.quad_l2)
+    names = bt.quad_term_names(METRIC_NAMES)
+    zscores = np.abs(np.asarray(quad["theta"]) / np.asarray(quad["stderr"]))
+    print(f"\nquadratic-interaction model "
+          f"(log-likelihood {quad['log_likelihood']:.2f}), "
+          f"top terms by |z|:")
+    for i in np.argsort(-zscores)[:8]:
+        print(f"  {names[i]:45s} {quad['theta'][i]:+8.3f} "
+              f"(z={zscores[i]:.1f})")
+
     out = paths.runs / "fitted_weights.json"
     out.write_text(json.dumps({
         "w_raw": list(map(float, fit.w_raw)),
@@ -397,6 +359,7 @@ def cmd_fit(args) -> None:
         "stderr": list(map(float, se)),
         "n_comparisons": fit.n_comparisons,
         "metric_names": METRIC_NAMES,
+        "quad": quad,
     }, indent=2))
     print(f"\nwrote {out}")
     print("re-optimize under your weights with:\n"
@@ -406,9 +369,7 @@ def cmd_fit(args) -> None:
 def cmd_report(args) -> None:
     paths = _paths(args)
     cands = []
-    for f in sorted(paths.runs.glob("*/candidate.json")):
-        if f.parent.name.startswith("exp_"):
-            continue
+    for f in iter_candidate_files(paths.runs):
         cands.append(json.loads(f.read_text()))
     if not cands:
         raise SystemExit("no candidates yet")
@@ -428,17 +389,16 @@ def cmd_top(args) -> None:
     """Rank the candidate pool under a preference weight vector."""
     paths = _paths(args)
     w_path = Path(args.weights)
-    w = np.asarray(json.loads(w_path.read_text())["w_raw"])
+    score = bt.scorer_from_weights(json.loads(w_path.read_text()))
     cands = []
-    for f in sorted(paths.runs.glob("*/candidate.json")):
-        if f.parent.name.startswith("exp_"):
-            continue
+    for f in iter_candidate_files(paths.runs):
         d = json.loads(f.read_text())
-        d["_score"] = float(w @ loss_vector_from_phi_dict(d["phi"]))
+        d["_score"] = score(d["phi"])
         cands.append(d)
     if not cands:
         raise SystemExit("no candidates yet")
     cands.sort(key=lambda d: d["_score"])
+    ranked = cands                    # full pool, kept for per-song sheets
     if args.per_track:
         seen, picks = set(), []
         for d in cands:
@@ -464,7 +424,8 @@ def cmd_top(args) -> None:
         tiles = []
         for d in cs:
             img = np.asarray(
-                Image.open(paths.runs / d["id"] / "presentation.png"),
+                Image.open(candidate_dir(paths.runs, d["id"])
+                           / "presentation.png"),
                 dtype=np.float64) / 255.0
             tiles.append((f"{(d.get('title') or d['id'])[:30]} | "
                           f"score {d['_score']:.2f} f={d.get('f_hz', 0):.0f} "
@@ -476,17 +437,21 @@ def cmd_top(args) -> None:
     out = sheet_of(top, paths.runs / "top_preference.png")
     print(f"\nsheet: {out}")
     if args.per_song:
-        by_song = {}
-        for d in cands:
-            by_song.setdefault(d.get("song", "?"), []).append(d)
+        # full ranked pool (not the per-track winners), one sheet per
+        # (paper, song) so paper sizes never mix in one folder
+        by_key = {}
+        for d in ranked:
+            key = (d.get("paper", "pre"), d.get("song", "?"))
+            by_key.setdefault(key, []).append(d)
         outdir = paths.runs / "top_by_song"
-        outdir.mkdir(exist_ok=True)
-        for song, cs in sorted(by_song.items()):
+        for (paper, song), cs in sorted(by_key.items()):
             stem = song.split(".")[0]
             title = (cs[0].get("title") or stem).replace("/", "-")[:40]
-            sheet_of(cs[:args.n], outdir / f"{stem} {title}.png")
-        print(f"per-song top-{args.n} sheets: {outdir}/ "
-              f"({len(by_song)} songs)")
+            pdir = outdir / paper
+            pdir.mkdir(parents=True, exist_ok=True)
+            sheet_of(cs[:args.n], pdir / f"{stem} {title}.png")
+        print(f"per-song top-{args.n} sheets: {outdir}/<paper>/ "
+              f"({len(by_key)} song x paper sheets)")
     print("(tiles are downscaled full matrices - open the listed "
           "runs/<id>/presentation.png at 100% to judge)")
 
@@ -540,25 +505,6 @@ def main(argv=None) -> None:
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(fn=cmd_optimize)
 
-    p = sub.add_parser("embed", help="candidate sweep via 2D targets + embedding "
-                                     "(~50x faster per candidate)")
-    p.add_argument("--weights", help="fitted_weights.json to optimize under")
-    p.add_argument("--baseline", action="store_true",
-                   help="uniform weights only (use with --replicates for a "
-                        "seed-diverse pool)")
-    p.add_argument("--replicates", type=int, default=1)
-    p.add_argument("--jobs", type=int, default=2,
-                   help="parallel workers (embedding is memory-heavy)")
-    p.add_argument("--embed-res", type=int, default=768,
-                   help="presentation embed resolution")
-    p.add_argument("--embed-rank", type=int, default=220)
-    p.add_argument("--scalarization", default="sum",
-                   choices=("sum", "chebyshev"))
-    p.add_argument("--generations", type=int, default=14)
-    p.add_argument("--population", type=int, default=12)
-    p.add_argument("--seed", type=int, default=0)
-    p.set_defaults(fn=cmd_embed)
-
     p = sub.add_parser("render", help="print-quality render of a candidate")
     p.add_argument("candidate")
     p.add_argument("--resolution", type=int, default=4096)
@@ -569,8 +515,21 @@ def main(argv=None) -> None:
     p.add_argument("--port", type=int, default=8765)
     p.set_defaults(fn=cmd_compare)
 
+    p = sub.add_parser("palette", help="interactive diverging-palette designer "
+                                       "for a candidate or image (printable)")
+    p.add_argument("target", nargs="?", default=None,
+                   help="candidate id (runs/<id>/presentation.png) or a path "
+                        "to a grayscale image; default: highest-rated candidate")
+    p.add_argument("--apply", help="non-interactive: reproduce the recolor "
+                                   "from a saved palette config JSON")
+    p.add_argument("-o", "--out", help="output PNG for --apply")
+    p.add_argument("--port", type=int, default=8766)
+    p.set_defaults(fn=cmd_palette)
+
     p = sub.add_parser("fit", help="fit Bradley-Terry weights from comparisons")
     p.add_argument("--l2", type=float, default=1.0)
+    p.add_argument("--quad-l2", type=float, default=3.0,
+                   help="L2 for the quadratic-interaction utility model")
     p.set_defaults(fn=cmd_fit)
 
     p = sub.add_parser("report", help="common-yardstick candidate table")

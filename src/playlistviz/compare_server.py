@@ -92,10 +92,10 @@ class CompareState:
     def _load_loss_vectors(self) -> dict[str, np.ndarray]:
         from .loss import loss_vector_from_phi_dict
 
+        from .pool import iter_candidate_files
+
         out = {}
-        for f in sorted(self.runs_dir.glob("*/candidate.json")):
-            if f.parent.name.startswith("exp_"):
-                continue  # experiment outputs are not comparison candidates
+        for f in iter_candidate_files(self.runs_dir):
             d = json.loads(f.read_text())
             # rebuilt from phi by name: robust to metric-set changes
             out[d["id"]] = loss_vector_from_phi_dict(d["phi"])
@@ -136,7 +136,12 @@ class CompareState:
         return len(bt.load_comparisons(self.comparisons_path))
 
     def image_path(self, cand_id: str) -> Path | None:
-        p = self.runs_dir / cand_id / "presentation.png"
+        from .pool import candidate_dir
+
+        d = candidate_dir(self.runs_dir, cand_id)
+        if d is None:
+            return None
+        p = d / "presentation.png"
         return p if p.exists() else None
 
 
