@@ -21,8 +21,6 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import minimize
 
-from .metrics import N_METRICS
-
 
 @dataclass
 class Comparison:
@@ -117,6 +115,90 @@ def predict_prob(fit: BTFit, loss_i: np.ndarray, loss_j: np.ndarray) -> float:
     """P(i beats j) under the fitted model."""
     z = fit.w_raw @ (loss_j - loss_i)
     return float(1.0 / (1.0 + np.exp(-z)))
+
+
+# -- quadratic-interaction utility model ---------------------------------------
+#
+# The linear fit above scores fixed-target losses ((phi-t)/s)^2, so the
+# observer's optimum is pinned to the population target per metric. The
+# quadratic model frees it: utility(phi) = theta . [z, z^2, z_i z_j] with
+# z the pool-standardized metrics, i.e. per-metric curvature with fitted
+# optima plus all pairwise interactions. Held out, it predicts choices
+# clearly better (0.65 vs 0.59 accuracy at 2k comparisons); the linear fit
+# is kept because its Hessian drives D-optimal pair selection.
+
+def _quad_features(z: np.ndarray) -> np.ndarray:
+    iu = np.triu_indices(len(z), 1)
+    return np.concatenate([z, z * z, np.outer(z, z)[iu]])
+
+
+def quad_fit(comparisons: list[Comparison], phi: dict[str, np.ndarray],
+             l2: float = 3.0) -> dict:
+    """MAP fit of the quadratic-interaction utility. Returns a
+    self-contained JSON-ready dict (standardization baked in)."""
+    if not comparisons:
+        raise ValueError("no comparisons to fit")
+    pool = np.asarray(list(phi.values()))
+    mu, sd = pool.mean(axis=0), pool.std(axis=0)
+    sd[sd < 1e-9] = 1.0
+    feat = {cid: _quad_features((v - mu) / sd) for cid, v in phi.items()}
+    # winner - loser: theta . feat is a utility (higher = preferred)
+    X = np.asarray([feat[c.winner] - feat[c.loser] for c in comparisons])
+    theta = np.zeros(X.shape[1])
+    for _ in range(200):
+        p = 1.0 / (1.0 + np.exp(-(X @ theta)))
+        g = X.T @ (1.0 - p) - 2 * l2 * theta
+        H = -(X.T * (p * (1 - p))) @ X - 2 * l2 * np.eye(len(theta))
+        step = np.linalg.solve(H, g)
+        theta -= step
+        if np.abs(step).max() < 1e-10:
+            break
+    ll = float(-np.logaddexp(0.0, -(X @ theta)).sum())
+    stderr = np.sqrt(np.diag(np.linalg.inv(-H)))
+    return {
+        "mu": [float(v) for v in mu],
+        "sd": [float(v) for v in sd],
+        "theta": [float(v) for v in theta],
+        "stderr": [float(v) for v in stderr],
+        "l2": l2,
+        "log_likelihood": ll,
+        "n_comparisons": len(comparisons),
+    }
+
+
+def quad_utility(phi_vec: np.ndarray, model: dict) -> float:
+    """Utility (higher = preferred) of a metric vector under a quad_fit."""
+    z = (np.asarray(phi_vec) - np.asarray(model["mu"])) / np.asarray(model["sd"])
+    return float(np.asarray(model["theta"]) @ _quad_features(z))
+
+
+def quad_term_names(metric_names: list[str]) -> list[str]:
+    iu = np.triu_indices(len(metric_names), 1)
+    return (list(metric_names)
+            + [f"{n}^2" for n in metric_names]
+            + [f"{metric_names[i]} x {metric_names[j]}"
+               for i, j in zip(*iu)])
+
+
+def scorer_from_weights(weights: dict):
+    """phi-dict -> score (lower = better) from a fitted_weights.json dict.
+
+    Prefers the quadratic-interaction model when present; falls back to
+    w_raw on the fixed-target loss vector for older weight files.
+    """
+    from .loss import loss_vector_from_phi_dict
+    from .metrics import METRIC_NAMES
+
+    if "quad" in weights:
+        model = weights["quad"]
+        def score(phi_dict: dict[str, float]) -> float:
+            v = np.array([phi_dict[n] for n in METRIC_NAMES])
+            return -quad_utility(v, model)
+    else:
+        w = np.asarray(weights["w_raw"])
+        def score(phi_dict: dict[str, float]) -> float:
+            return float(w @ loss_vector_from_phi_dict(phi_dict))
+    return score
 
 
 def select_pairs(loss_vectors: dict[str, np.ndarray],

@@ -113,3 +113,81 @@ def test_select_pairs_respects_blocks():
     assert pairs  # within-block pairs exist: 2 * C(3,2) = 6
     for x, y in pairs:
         assert blocks[x] == blocks[y]
+
+
+# -- quadratic-interaction utility model ---------------------------------------
+
+def _quad_world(rng, n_candidates=60):
+    """Observer with an interior optimum on metric 0 and a 1x2 interaction."""
+    phi = {f"c{i:02d}": rng.normal(0, 1, N_METRICS)
+           for i in range(n_candidates)}
+
+    def u_true(v):
+        return -2.0 * (v[0] - 0.5) ** 2 + 1.5 * v[1] * v[2]
+
+    return phi, u_true
+
+
+def _simulate_quad(rng, phi, u_true, n=1500):
+    ids = sorted(phi)
+    comps = []
+    for _ in range(n):
+        i, j = rng.choice(len(ids), 2, replace=False)
+        a, b = ids[i], ids[j]
+        p_a = 1 / (1 + np.exp(-(u_true(phi[a]) - u_true(phi[b]))))
+        winner, loser = (a, b) if rng.random() < p_a else (b, a)
+        comps.append(bt.Comparison(winner=winner, loser=loser))
+    return comps
+
+
+def test_quad_fit_recovers_nonlinear_utility():
+    rng = np.random.default_rng(5)
+    phi, u_true = _quad_world(rng)
+    comps = _simulate_quad(rng, phi, u_true)
+    model = bt.quad_fit(comps, phi, l2=1.0)
+    u_hat = np.array([bt.quad_utility(phi[c], model) for c in sorted(phi)])
+    u_ref = np.array([u_true(phi[c]) for c in sorted(phi)])
+    r = np.corrcoef(u_hat, u_ref)[0, 1]
+    assert r > 0.8  # a linear-in-phi model cannot reach this
+
+
+def test_quad_fit_beats_linear_on_interactions():
+    rng = np.random.default_rng(6)
+    phi, u_true = _quad_world(rng)
+    train = _simulate_quad(rng, phi, u_true, n=1500)
+    test = _simulate_quad(rng, phi, u_true, n=500)
+    model = bt.quad_fit(train, phi, l2=1.0)
+    correct = sum(
+        bt.quad_utility(phi[c.winner], model)
+        > bt.quad_utility(phi[c.loser], model)
+        for c in test)
+    assert correct / len(test) > 0.65
+
+
+def test_scorer_from_weights_quad_and_fallback():
+    rng = np.random.default_rng(7)
+    phi, u_true = _quad_world(rng)
+    comps = _simulate_quad(rng, phi, u_true, n=800)
+    model = bt.quad_fit(comps, phi, l2=1.0)
+
+    from playlistviz.metrics import METRIC_NAMES
+    as_dict = {cid: dict(zip(METRIC_NAMES, v)) for cid, v in phi.items()}
+
+    score = bt.scorer_from_weights({"quad": model})
+    a = sorted(phi)[0]
+    # lower score = better = higher utility
+    assert score(as_dict[a]) == pytest.approx(
+        -bt.quad_utility(phi[a], model))
+
+    # legacy file without "quad" falls back to w_raw on loss vectors
+    from playlistviz.loss import loss_vector_from_phi_dict
+    w = rng.random(N_METRICS)
+    score_lin = bt.scorer_from_weights({"w_raw": list(w)})
+    assert score_lin(as_dict[a]) == pytest.approx(
+        float(w @ loss_vector_from_phi_dict(as_dict[a])))
+
+
+def test_quad_term_names_shape():
+    names = bt.quad_term_names(["a", "b", "c"])
+    assert names == ["a", "b", "c", "a^2", "b^2", "c^2",
+                     "a x b", "a x c", "b x c"]
