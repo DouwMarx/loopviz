@@ -2,7 +2,7 @@
 
 ![a song as the matrix that plays it](doc/example_the-world-breathes-with-me.png)
 
-Not a picture of a song: the matrix that plays it ([The World Breathes with Me](https://www.youtube.com/watch?v=Dc2CtNFOqV4)).
+The matrix that plays ([The World Breathes with Me](https://www.youtube.com/watch?v=Dc2CtNFOqV4)) on a loop.
 
 Cut a song into N consecutive windows `w_1 ... w_N` of n samples. There is
 an n x n matrix A that advances the song one window at a time and closes
@@ -12,16 +12,13 @@ the loop:
 A w_k = w_{k+1},        A w_N = w_1
 ```
 
-Iterating A plays the song exactly, forever: eigenvalues on the unit
-circle by construction. The print shows A at one entry per dot, never
-cropped, never resampled: the artwork is the operator. One equation
-sizes everything:
+Iterating A plays the song exactly, forever. A is the exact
+[dynamic mode decomposition](https://en.wikipedia.org/wiki/Dynamic_mode_decomposition)
+operator of the window sequence, with zero residual and no rank
+truncation; the cyclic closure pins its nonzero eigenvalues to the unit
+circle, so the loop never decays.
 
-```
-f T = rho n^2      (sample rate x duration = density x pixels)
-```
-
-paper, sample rate, song length and density trade off. `doc/math.pdf` derives everything.
+See `doc/math.pdf` for a derivation.
 
 ## Pipeline
 
