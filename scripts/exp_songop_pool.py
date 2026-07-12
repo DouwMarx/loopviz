@@ -36,12 +36,12 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.loss import equal_weights, loss_vector, scalar_loss
-from playlistviz.matviz import gray
-from playlistviz.metrics import METRICS, features
-from playlistviz.render import save_png
-from playlistviz.sheet import make_sheet
-from playlistviz.songmatrix import (Plan, build, load_audio, loop_degradation,
+from loopviz.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.matviz import gray
+from loopviz.metrics import METRICS, features
+from loopviz.render import save_png
+from loopviz.sheet import make_sheet
+from loopviz.songmatrix import (Plan, build, load_audio, loop_degradation,
                                     materialize)
 
 ROOT = Path(__file__).parent.parent
@@ -239,7 +239,7 @@ See fidelity_map.png (Gram condition and horizon vs n, per f).
 ## Feasible bands
 {band_txt}
 
-## Pool ({len(rows)} candidates in runs/songop_*, do `playlistviz compare`)
+## Pool ({len(rows)} candidates in runs/songop_*, do `loopviz compare`)
 
 Equal-weight metric ranking (a prior, not the verdict):
 {rank}
@@ -248,7 +248,7 @@ Every candidate is the EXACT operator; each candidate.json carries its
 measured drift/pass and loop horizon in years.
 
 Viewing note: sheet tiles are full matrices, downscaled - signed texture
-cancels toward gray at reduced scale; judge candidates in `playlistviz
+cancels toward gray at reduced scale; judge candidates in `loopviz
 compare` (nearest-neighbor scaling) or the presentation.png files at
 native size.
 """)

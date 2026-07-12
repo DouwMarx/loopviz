@@ -12,7 +12,7 @@ Seeded with window 1, iterating A0 plays the song and repeats.
 
 Sizing/conditioning are studied systematically in exp_operator_sizing.py
 and display modes in exp_matrix_viz.py; this script keeps the original
-A0-vs-Gram comparison. Construction lives in playlistviz.songmatrix.
+A0-vs-Gram comparison. Construction lives in loopviz.songmatrix.
 
 Run: .venv/bin/python scripts/exp_song_matrix.py [--song 0] [--n 1024]
                                                  [--windows 512]
@@ -26,10 +26,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.matviz import gray
-from playlistviz.render import save_png
-from playlistviz.sheet import make_sheet
-from playlistviz.songmatrix import Plan, build, load_audio, materialize
+from loopviz.matviz import gray
+from loopviz.render import save_png
+from loopviz.sheet import make_sheet
+from loopviz.songmatrix import Plan, build, load_audio, materialize
 
 ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "exp_song_matrix"

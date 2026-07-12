@@ -18,7 +18,7 @@ import numpy as np
 from . import bt
 
 PAGE = """<!DOCTYPE html>
-<html><head><title>playlistviz: which A is more beautiful?</title>
+<html><head><title>loopviz: which A is more beautiful?</title>
 <style>
   body { background: #111; color: #ddd; font-family: system-ui, sans-serif;
          display: flex; flex-direction: column; align-items: center; }
@@ -49,7 +49,7 @@ async function next() {
   if (d.done) {
     document.getElementById('status').textContent =
       'No more scheduled pairs (' + d.count + ' comparisons recorded). ' +
-      'Run "playlistviz fit" to fit your weights.';
+      'Run "loopviz fit" to fit your weights.';
     return;
   }
   pair = d;
@@ -193,7 +193,7 @@ def make_handler(state: CompareState):
 def serve(runs_dir: Path, comparisons_path: Path, port: int = 8765) -> None:
     state = CompareState(runs_dir, comparisons_path)
     if not state.loss_vectors:
-        raise SystemExit("no candidates found in runs/ - run `playlistviz optimize` first")
+        raise SystemExit("no candidates found in runs/ - run `loopviz optimize` first")
     httpd = HTTPServer(("127.0.0.1", port), make_handler(state))
     print(f"{len(state.loss_vectors)} candidates loaded.")
     print(f"Open http://127.0.0.1:{port} and start comparing (Ctrl-C to stop).")

@@ -34,12 +34,12 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.loss import equal_weights, loss_vector, scalar_loss
-from playlistviz.matviz import gray
-from playlistviz.metrics import METRICS, features
-from playlistviz.pool import candidate_dir, song_dir
-from playlistviz.render import save_png
-from playlistviz.songmatrix import (Plan, build, load_audio, loop_degradation,
+from loopviz.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.matviz import gray
+from loopviz.metrics import METRICS, features
+from loopviz.pool import candidate_dir, song_dir
+from loopviz.render import save_png
+from loopviz.songmatrix import (Plan, build, load_audio, loop_degradation,
                                     materialize)
 
 ROOT = Path(__file__).parent.parent

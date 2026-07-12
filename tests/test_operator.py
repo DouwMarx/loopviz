@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from playlistviz.operator import PlaylistOperator
+from loopviz.operator import PlaylistOperator
 
 
 @pytest.fixture

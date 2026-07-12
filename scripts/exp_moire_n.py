@@ -26,10 +26,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.matviz import gray, save_rgb
-from playlistviz.metrics import METRIC_NAMES, features
-from playlistviz.sheet import make_sheet
-from playlistviz.songmatrix import Plan, build, load_audio, loop_degradation, materialize
+from loopviz.matviz import gray, save_rgb
+from loopviz.metrics import METRIC_NAMES, features
+from loopviz.sheet import make_sheet
+from loopviz.songmatrix import Plan, build, load_audio, loop_degradation, materialize
 
 ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "exp_moire_n"

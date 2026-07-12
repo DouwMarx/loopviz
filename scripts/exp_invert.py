@@ -5,7 +5,7 @@ The operator is untouched - inversion flips only the value -> ink ramp
 kind of display freedom as the diverging palettes. For the best
 candidate per (song, paper) under the fitted preference model this
 writes a sibling candidate <id>_inv into the same song/paper folder with
-metrics recomputed on the inverted image, so `playlistviz compare` will
+metrics recomputed on the inverted image, so `loopviz compare` will
 pair original vs inverted within each song block and the BT loop can
 learn whether inversion is liked. Prints ignore inverted candidates
 until that data exists (the model has never seen an inverted image, so
@@ -26,11 +26,11 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.bt import scorer_from_weights
-from playlistviz.loss import equal_weights, loss_vector, scalar_loss
-from playlistviz.metrics import METRICS, features
-from playlistviz.pool import candidate_dir, iter_candidate_files
-from playlistviz.sheet import make_sheet
+from loopviz.bt import scorer_from_weights
+from loopviz.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.metrics import METRICS, features
+from loopviz.pool import candidate_dir, iter_candidate_files
+from loopviz.sheet import make_sheet
 
 ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "exp_invert"
@@ -95,7 +95,7 @@ def main() -> None:
 For the best candidate per (song, paper) under the fitted preference
 model, a sibling candidate `<id>_inv` with the ink ramp inverted
 (255 - pixel, lossless; the operator is untouched) now sits in the same
-song/paper folder. `playlistviz compare` pairs candidates within a song
+song/paper folder. `loopviz compare` pairs candidates within a song
 block, so originals and inversions will meet head-to-head and the BT fit
 learns whether inversion is preferred. Prints exclude inverted
 candidates until such data exists.

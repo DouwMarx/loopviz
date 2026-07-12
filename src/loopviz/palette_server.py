@@ -23,7 +23,7 @@ from . import palette
 from .palette import KNOB_RANGES, PRESETS, PaletteSpec
 
 PAGE = """<!DOCTYPE html>
-<html><head><title>playlistviz: palette designer</title>
+<html><head><title>loopviz: palette designer</title>
 <style>
   body { background:#111; color:#ddd; font-family:system-ui,sans-serif;
          margin:0; display:flex; height:100vh; }

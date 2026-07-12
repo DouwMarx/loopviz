@@ -1,4 +1,4 @@
-"""playlistviz: a cyclic playlist operator whose free subspace is optimized for aesthetics.
+"""loopviz: a cyclic playlist operator whose free subspace is optimized for aesthetics.
 
 Pipeline: youtube links -> audio matrix X -> factored operator A = A0 + Z P_perp
 -> rendered image of A -> aesthetic metric loss -> ES over Z/render params

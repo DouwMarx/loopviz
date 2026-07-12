@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from playlistviz import palette as P
-from playlistviz.palette import PaletteSpec
+from loopviz import palette as P
+from loopviz.palette import PaletteSpec
 
 
 @pytest.fixture
@@ -176,7 +176,7 @@ def test_save_config_name_cannot_escape_out_dir(gray, tmp_path):
 
 @pytest.fixture
 def server(gray, tmp_path):
-    from playlistviz.palette_server import PaletteState, make_handler
+    from loopviz.palette_server import PaletteState, make_handler
 
     source, _ = gray
     state = PaletteState(source, tmp_path / "out", source_id="candX")
@@ -235,9 +235,9 @@ def _write_candidate(runs, cid, loss_eq, phi):
 
 
 def test_best_candidate_prefers_fitted_then_falls_back(tmp_path):
-    from playlistviz.cli import _best_candidate
-    from playlistviz.config import Paths
-    from playlistviz.metrics import METRIC_NAMES, METRICS
+    from loopviz.cli import _best_candidate
+    from loopviz.config import Paths
+    from loopviz.metrics import METRIC_NAMES, METRICS
 
     runs = tmp_path / "runs"
     on_target = {m.name: m.target for m in METRICS}   # ~zero loss vector
@@ -263,8 +263,8 @@ def test_best_candidate_prefers_fitted_then_falls_back(tmp_path):
 
 
 def test_best_candidate_empty_raises(tmp_path):
-    from playlistviz.cli import _best_candidate
-    from playlistviz.config import Paths
+    from loopviz.cli import _best_candidate
+    from loopviz.config import Paths
 
     (tmp_path / "runs").mkdir()
     with pytest.raises(SystemExit):

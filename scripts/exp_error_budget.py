@@ -21,10 +21,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.matviz import gray
-from playlistviz.render import save_png
-from playlistviz.sheet import make_sheet
-from playlistviz.songmatrix import (attenuation_errors, build, decompose,
+from loopviz.matviz import gray
+from loopviz.render import save_png
+from loopviz.sheet import make_sheet
+from loopviz.songmatrix import (attenuation_errors, build, decompose,
                                     load_audio, loop_degradation, plan,
                                     reconstruct)
 

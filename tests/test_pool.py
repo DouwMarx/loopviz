@@ -1,6 +1,6 @@
 import json
 
-from playlistviz.pool import candidate_dir, iter_candidate_files, slug, song_dir
+from loopviz.pool import candidate_dir, iter_candidate_files, slug, song_dir
 
 
 def _mk(d, cid):

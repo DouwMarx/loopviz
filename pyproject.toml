@@ -1,5 +1,5 @@
 [project]
-name = "playlistviz"
+name = "loopviz"
 version = "0.1.0"
 description = "Cyclic playlist operator A from audio, with its free subspace optimized for aesthetics via BT-personalized metric weights"
 requires-python = ">=3.11"
@@ -16,14 +16,14 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-playlistviz = "playlistviz.cli:main"
+loopviz = "loopviz.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/playlistviz"]
+packages = ["src/loopviz"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

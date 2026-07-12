@@ -6,16 +6,16 @@ import json
 import numpy as np
 import pytest
 
-from playlistviz import bt
-from playlistviz.compare_server import CompareState
-from playlistviz.config import AudioConfig, OptConfig, ZConfig
-from playlistviz.ingest import load_matrix, save_matrix, window_seconds
-from playlistviz.loss import equal_weights, loss_vector, scalar_loss
-from playlistviz.metrics import METRIC_NAMES, features
-from playlistviz.operator import PlaylistOperator
-from playlistviz.optimize import make_objective, run_es
-from playlistviz.render import render, save_png
-from playlistviz.zspace import N_PARAMS, generate_Z, theta_to_params
+from loopviz import bt
+from loopviz.compare_server import CompareState
+from loopviz.config import AudioConfig, OptConfig, ZConfig
+from loopviz.ingest import load_matrix, save_matrix, window_seconds
+from loopviz.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.metrics import METRIC_NAMES, features
+from loopviz.operator import PlaylistOperator
+from loopviz.optimize import make_objective, run_es
+from loopviz.render import render, save_png
+from loopviz.zspace import N_PARAMS, generate_Z, theta_to_params
 
 
 def synthetic_songs(rng, D=4000, N=5):

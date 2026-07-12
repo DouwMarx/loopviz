@@ -1,14 +1,14 @@
 """Command-line pipeline.
 
-  playlistviz download --links-file links.txt      # or --link URL (repeat)
-  playlistviz build                                 # X, factors, verification
-  playlistviz optimize --schedule                   # baseline + Dirichlet sweep
-  playlistviz optimize --baseline                   # equal weights only
-  playlistviz compare                               # pairwise comparison UI
-  playlistviz fit                                   # Bradley-Terry weight fit
-  playlistviz optimize --weights fitted.json        # re-run under fitted w
-  playlistviz render <candidate> --resolution 4096  # print-quality export
-  playlistviz report                                # common-yardstick table
+  loopviz download --links-file links.txt      # or --link URL (repeat)
+  loopviz build                                 # X, factors, verification
+  loopviz optimize --schedule                   # baseline + Dirichlet sweep
+  loopviz optimize --baseline                   # equal weights only
+  loopviz compare                               # pairwise comparison UI
+  loopviz fit                                   # Bradley-Terry weight fit
+  loopviz optimize --weights fitted.json        # re-run under fitted w
+  loopviz render <candidate> --resolution 4096  # print-quality export
+  loopviz report                                # common-yardstick table
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _paths(args) -> Paths:
 def _load_operator(paths: Paths) -> PlaylistOperator:
     matrix_path = paths.data / "songs.npz"
     if not matrix_path.exists():
-        raise SystemExit("no song matrix - run `playlistviz build` first")
+        raise SystemExit("no song matrix - run `loopviz build` first")
     X, _ = load_matrix(matrix_path)
     return PlaylistOperator.from_songs(X)
 
@@ -177,7 +177,7 @@ def cmd_optimize(args) -> None:
         w = np.asarray(json.loads(Path(args.weights).read_text())["w_simplex"])
         if w.size != N_METRICS:
             raise SystemExit(f"weights file has {w.size} entries, expected "
-                             f"{N_METRICS}: re-run `playlistviz fit`")
+                             f"{N_METRICS}: re-run `loopviz fit`")
         draws.append(("fitted", w, None))
     elif args.baseline:
         draws.append(("baseline_eq", equal_weights(), float("inf")))
@@ -310,7 +310,7 @@ def cmd_fit(args) -> None:
     paths = _paths(args)
     comps = bt.load_comparisons(paths.comparisons)
     if not comps:
-        raise SystemExit("no comparisons recorded - run `playlistviz compare` first")
+        raise SystemExit("no comparisons recorded - run `loopviz compare` first")
     # loss vectors are rebuilt from stored phi (by metric name) so candidates
     # saved under older metric sets stay usable
     loss_vectors = {}
@@ -363,7 +363,7 @@ def cmd_fit(args) -> None:
     }, indent=2))
     print(f"\nwrote {out}")
     print("re-optimize under your weights with:\n"
-          f"  playlistviz optimize --weights {out}")
+          f"  loopviz optimize --weights {out}")
 
 
 def cmd_report(args) -> None:
@@ -459,7 +459,7 @@ def cmd_top(args) -> None:
 # -- entry point ---------------------------------------------------------------
 
 def main(argv=None) -> None:
-    ap = argparse.ArgumentParser(prog="playlistviz", description=__doc__,
+    ap = argparse.ArgumentParser(prog="loopviz", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", default=".", help="project root (default: cwd)")
     sub = ap.add_subparsers(dest="cmd", required=True)

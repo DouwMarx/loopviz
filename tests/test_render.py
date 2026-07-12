@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from playlistviz.render import (block_grams, energy_image, mean_image,
+from loopviz.render import (block_grams, energy_image, mean_image,
                                 pool_rows, render, save_png)
-from playlistviz.zspace import PARAM_NAMES, theta_to_params
+from loopviz.zspace import PARAM_NAMES, theta_to_params
 
 
 @pytest.fixture

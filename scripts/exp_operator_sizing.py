@@ -17,10 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.matviz import gray
-from playlistviz.render import save_png
-from playlistviz.sheet import make_sheet
-from playlistviz.songmatrix import (DISCERNIBLE_PITCH_MM, build, full_rank_side,
+from loopviz.matviz import gray
+from loopviz.render import save_png
+from loopviz.sheet import make_sheet
+from loopviz.songmatrix import (DISCERNIBLE_PITCH_MM, build, full_rank_side,
                                     load_audio, materialize, plan)
 
 ROOT = Path(__file__).parent.parent

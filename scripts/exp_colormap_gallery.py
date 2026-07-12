@@ -22,7 +22,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz.sheet import make_sheet
+from loopviz.sheet import make_sheet
 
 ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "exp_colormap_gallery"

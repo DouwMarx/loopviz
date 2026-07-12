@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from playlistviz import metrics as M
+from loopviz import metrics as M
 
 
 @pytest.fixture

@@ -23,9 +23,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from playlistviz import bt
-from playlistviz.loss import loss_vector_from_phi_dict
-from playlistviz.metrics import METRIC_NAMES, N_METRICS
+from loopviz import bt
+from loopviz.loss import loss_vector_from_phi_dict
+from loopviz.metrics import METRIC_NAMES, N_METRICS
 
 ROOT = Path(__file__).parent.parent
 ARCHIVE = ROOT / "runs" / "archive_v3_demo"
