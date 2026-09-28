@@ -28,6 +28,23 @@ scripts/exp_paper_sweep.py            # exact candidates per paper size
 loopviz compare                       # pairwise choices in the browser
 loopviz fit                           # preference model
 scripts/make_prints.py                # print-exact PDFs, 100% scale only
+loopviz relief sweep|build|demo       # the same operator as a 3D-printed relief
+```
+
+## 3D print
+
+`loopviz relief` displays the operator as a height field: one square
+column per entry, height = entry, on a bed of up to 305 mm. Cell pitch
+sets the sample rate (`f = rho n^2 / T`, `n = side / pitch`) and layer
+height sets the number of distinguishable heights (~5-6 bits on FDM).
+The STL is built directly from the matrix (watertight, stepped, no CAD
+kernel) and every column top sits on a layer boundary. See `doc/relief.md`
+for sizing, printer limits and what the quantized object still plays.
+
+```
+loopviz relief sweep --audio song.wav --start 324.68 --end 338.18 --probe
+loopviz relief build --audio song.wav --start 324.68 --end 338.18 --pitch 1.5
+loopviz relief demo --audio song.wav --start 324.68 --end 338.18   # 2x2 .. 12x12 test meshes
 ```
 
 ## Choosing by comparison

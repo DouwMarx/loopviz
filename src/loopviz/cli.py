@@ -9,6 +9,7 @@
   loopviz optimize --weights fitted.json        # re-run under fitted w
   loopviz render <candidate> --resolution 4096  # print-quality export
   loopviz report                                # common-yardstick table
+  loopviz relief sweep|build|demo               # 3D-printed height field
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from .operator import PlaylistOperator
 from .optimize import make_objective, run_es
 from .pool import candidate_dir, iter_candidate_files
 from .render import render, save_png
+from . import relief_cli
 from .zspace import generate_Z, theta_to_params
 
 
@@ -544,6 +546,8 @@ def main(argv=None) -> None:
                    help="also write a top-n sheet for every song "
                         "(runs/top_by_song/)")
     p.set_defaults(fn=cmd_top)
+
+    relief_cli.add_parser(sub)
 
     args = ap.parse_args(argv)
     args.fn(args)
