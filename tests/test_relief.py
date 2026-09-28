@@ -163,6 +163,30 @@ def test_cli_sweep_probe_and_step_layers(tmp_path, capsys):
     assert lv(one) == 2 * (lv(two) - 1) + 1                  # 61 vs 31
 
 
+def test_cli_testtile(tmp_path):
+    import soundfile as sf
+
+    from loopviz.cli import main
+    from loopviz.relief_cli import TILE_ROWS
+
+    sr = 4000
+    t = np.arange(int(2.0 * sr)) / sr
+    x = np.sin(2 * np.pi * 110 * t) + 0.2 * np.random.default_rng(0).standard_normal(t.size)
+    sf.write(str(tmp_path / "s.wav"), x, sr)
+    out = tmp_path / "tiles"
+    main(["relief", "testtile", "--audio", str(tmp_path / "s.wav"), "--start", "0.2",
+          "--end", "1.7", "--bed", "40", "--margin", "2", "--rho", "0.7",
+          "--pitches", "2.0,2.5", "--cells", "6", "--out", str(out)])
+    for p in ("2", "2.5"):
+        H = np.loadtxt(out / f"testtile_p{p}.heights.txt")
+        assert H.shape == (6 + len(TILE_ROWS) - 1, 6)
+        V, F = read_stl(out / f"testtile_p{p}.stl")
+        assert check_mesh(V, F, H, float(p))["volume_ok"]
+        assert H[-1].max() == pytest.approx(2.0 + 6.0)      # spikes reach full relief
+        assert np.allclose(np.diff(H[6]), 0.1)              # 1-layer staircase
+    assert (out / "README.md").exists() and (out / "testtile_sheet.png").exists()
+
+
 def test_cli_build_end_to_end(tmp_path):
     """The documented user path: a wav in, STL + previews + json out."""
     import json

@@ -8,6 +8,10 @@
   loopviz relief demo
       tiny hand-made reliefs (2x2, 3x3, 4x4, 12x12 from the song) to
       inspect the mesh construction before trusting a 300 mm print
+  loopviz relief testtile --audio song.wav --start 324.68 --end 338.18
+      one calibration tile per pitch: staircases, checkerboards, spikes
+      and a 12x12 corner of the real print, to check the printer before
+      the 300 mm run
 """
 
 from __future__ import annotations
@@ -313,6 +317,89 @@ two-manifold checkers (trimesh.is_watertight) report it.
     print(f"wrote {out}/demo_sheet.png")
 
 
+def test_tile(H_song: np.ndarray, rp: ReliefPlan, layer_mm: float) -> np.ndarray:
+    """Calibration patterns above a corner of the real relief. Rows from
+    y = 0: the song corner (cells x cells), then staircases of 1, 2 and
+    4 layers per cell, checkerboards of 1 and 5 level steps, and spikes
+    at full relief every third cell (the worst free-standing column)."""
+    m = H_song.shape[1]
+    b, step, top = rp.base_mm, rp.step_mm, rp.base_mm + rp.relief_mm
+    k = np.arange(m)
+    rows = [
+        np.minimum(b + k * 1 * layer_mm, top),
+        np.minimum(b + k * 2 * layer_mm, top),
+        np.minimum(b + k * 4 * layer_mm, top),
+        b + (k % 2) * step,
+        b + (k % 2) * 5 * step,
+        np.where(k % 3 == 1, top, b),
+    ]
+    return np.vstack([H_song, np.array(rows)])
+
+
+TILE_ROWS = ("song corner", "stair 1 layer/cell", "stair 2 layers/cell",
+             "stair 4 layers/cell", "checker 1 step", "checker 5 steps",
+             "spikes to full relief")
+
+
+def cmd_testtile(args) -> None:
+    pr = printer(args.printer, bed_mm=args.bed, layer_mm=args.layer,
+                 margin_mm=args.margin, max_aspect=args.max_aspect,
+                 step_layers=args.step_layers)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    signal, T, _ = load_loop(Path(args.audio), args.start, args.end)
+    c = args.cells
+    lines, pngs = [], []
+    for pitch in args.pitches:
+        rp = relief_plan(T, pr, pitch, rho=args.rho, relief_mm=args.relief,
+                         base_mm=args.base)
+        r = probe(signal, T, rp.n, rp.plan.rho)
+        H_full = heights(materialize(r["op"]), rp, args.clip)
+        H = test_tile(H_full[:c, :c], rp, pr.layer_mm)
+        V, F = heightfield_mesh(H, pitch)
+        chk = check_mesh(V, F, H, pitch)
+        if not (chk["watertight"] and chk["volume_ok"]):
+            raise RuntimeError(f"pitch {pitch}: {chk}")
+        name = f"testtile_p{pitch:g}"
+        write_stl(V, F, out / f"{name}.stl", name=name)
+        np.savetxt(out / f"{name}.heights.txt", H, fmt="%.2f")
+        pngs.append((name, mesh_views(V, F, out / f"{name}.png",
+                                      title=f"{name}: {H.shape[1] * pitch:g} x "
+                                            f"{H.shape[0] * pitch:g} mm")))
+        lines.append(f"| {pitch:g} | {rp.n} | {rp.plan.f:.0f} | {H.shape[1] * pitch:g} x "
+                     f"{H.shape[0] * pitch:g} x {H.max():g} | {rp.levels} | "
+                     f"{max_protrusion(H_full):.1f} | {name}.stl |")
+        print(f"{name}: {H.shape[1] * pitch:g} x {H.shape[0] * pitch:g} mm, "
+              f"{chk['faces']} faces, corner of the n={rp.n} print")
+    sheet(pngs, out / "testtile_sheet.png", cols=2)
+    rows_desc = "\n".join(f"- rows {c + i} : {d}" if i else f"- rows 0-{c - 1}: {d}"
+                          for i, d in enumerate(TILE_ROWS))
+    (out / "README.md").write_text(f"""\
+# test tiles: print these before the 300 mm relief
+
+One STL per cell pitch. Each is {c} cells wide; the bottom {c} rows (y from
+0) are the actual corner of the full-size print at that pitch, with the
+same {rp.base_mm} mm base, {rp.relief_mm} mm relief and {pr.step_mm} mm level
+step, so what you see is what the big print will look like. Above it,
+from y = {c} cells upward:
+
+{rows_desc}
+
+Print with layer height {pr.layer_mm} mm (the levels are {pr.step_layers} layers
+each), 100 % rectilinear infill, no supports, seam aligned. Then judge:
+do the squares read as squares (corner rounding), which staircase step
+is the smallest you can see and feel, do the spikes print clean.
+
+| pitch mm | n of full print | f Hz | tile mm | levels | max protrusion in full print (mm) | file |
+|---|---|---|---|---|---|---|
+{chr(10).join(lines)}
+
+Loop {args.start} to {args.end} s of {Path(args.audio).name}; printer preset
+{pr.name} ({pr.nozzle_mm} mm nozzle).
+""")
+    print(f"wrote {out}/README.md")
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser("relief", help="3D-printed height-field version of the "
                                       "song operator")
@@ -360,6 +447,17 @@ def add_parser(sub) -> None:
                    help="bisect the largest stable rho instead of --rho")
     q.add_argument("--out", help="output dir (default runs/relief/<audio>_p<pitch>)")
     q.set_defaults(fn=cmd_build)
+
+    q = ss.add_parser("testtile", help="calibration tiles per pitch, with a "
+                                       "corner of the real print")
+    common(q)
+    q.add_argument("--pitches", type=lambda s: [float(v) for v in s.split(",")],
+                   default=[1.5, 2.0, 2.5, 3.0])
+    q.add_argument("--cells", type=int, default=12, help="tile width in cells")
+    q.add_argument("--relief", type=float, default=None,
+                   help="height range (mm); default as the full print")
+    q.add_argument("--out", default="prints/testtile")
+    q.set_defaults(fn=cmd_testtile)
 
     q = ss.add_parser("demo", help="tiny meshes for inspection")
     q.add_argument("--out", default="runs/relief/demo")

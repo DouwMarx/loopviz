@@ -40,11 +40,15 @@ height sets the number of distinguishable heights (~5-6 bits on FDM).
 The STL is built directly from the matrix (watertight, stepped, no CAD
 kernel) and every column top sits on a layer boundary. See `doc/relief.md`
 for sizing, printer limits and what the quantized object still plays.
+`prints/testtile/` holds ready-to-print calibration tiles (the 12x12 corner
+of the full print at 1.5, 2, 2.5 and 3 mm pitch plus staircases and
+checkerboards): print those first.
 
 ```
 loopviz relief sweep --audio song.wav --start 324.68 --end 338.18 --probe
 loopviz relief build --audio song.wav --start 324.68 --end 338.18 --pitch 1.5
-loopviz relief demo --audio song.wav --start 324.68 --end 338.18   # 2x2 .. 12x12 test meshes
+loopviz relief testtile --audio song.wav --start 324.68 --end 338.18  # calibration tiles
+loopviz relief demo --audio song.wav --start 324.68 --end 338.18      # 2x2 .. 12x12 test meshes
 ```
 
 ## Choosing by comparison
