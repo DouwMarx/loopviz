@@ -40,7 +40,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import ZConfig
+from ..config import ZConfig
 
 # theta layout: name -> (low, high). Values arrive in [0, 1] from the
 # optimizer's sigmoid map and are affinely mapped into these ranges.

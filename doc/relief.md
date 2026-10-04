@@ -1,4 +1,9 @@
-# The operator as a 3D print
+# The operator as a 3D print (legacy stepped design)
+
+Legacy: `loopviz relief` is the stepped predecessor of `loopviz plate`
+(`doc/plate.md`), kept for its sizing, printer limits and playback
+analysis. Code in `src/loopviz/print3d/relief.py` and `relief_cli.py`;
+calibration tiles in `archive/relief_testtile/`.
 
 `loopviz relief` turns the exact n x n window-advance operator A0 into a
 stepped relief: one square column per entry, top height = entry. Same
@@ -120,7 +125,7 @@ is the honest check):
 
 ## Does the printed object still play?
 
-`scripts/exp_relief_quantization.py` measures the object as printed:
+`scripts/experiments/exp_relief_quantization.py` measures the object as printed:
 Q(A0), the entry-wise quantization of the exact operator to L heights,
 applied to the loop's windows. Step error is `|Q(A0) w_k - w_(k+1)| /
 |w_(k+1)|` (1 = as wrong as silence). Findings for this loop:

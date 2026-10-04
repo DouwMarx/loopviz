@@ -14,15 +14,15 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from loopviz.config import AudioConfig
 from loopviz.ingest import build_song_matrix, song_durations, window_seconds
 from loopviz.operator import PlaylistOperator
-from loopviz.render import energy_image, mean_image
-from loopviz.sheet import make_sheet
+from loopviz.paper.render import energy_image, mean_image
+from loopviz.paper.sheet import make_sheet
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "exp_length_policy"
 SR = 1000
 P = 512

@@ -20,11 +20,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz.sheet import make_sheet
+from loopviz.paper.sheet import make_sheet
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "exp_colormap_gallery"
 Image.MAX_IMAGE_PIXELS = None
 

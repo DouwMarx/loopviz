@@ -21,13 +21,13 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz import bt
-from loopviz.loss import loss_vector_from_phi_dict
-from loopviz.metrics import METRIC_NAMES, N_METRICS
+from loopviz.paper import bt
+from loopviz.paper.loss import loss_vector_from_phi_dict
+from loopviz.paper.metrics import METRIC_NAMES, N_METRICS
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE = ROOT / "runs" / "archive_v3_demo"
 KNOBS = ("n", "rho", "f_hz", "clip_pct")
 

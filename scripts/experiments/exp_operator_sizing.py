@@ -15,15 +15,15 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz.matviz import gray
-from loopviz.render import save_png
-from loopviz.sheet import make_sheet
+from loopviz.paper.matviz import gray
+from loopviz.paper.render import save_png
+from loopviz.paper.sheet import make_sheet
 from loopviz.songmatrix import (DISCERNIBLE_PITCH_MM, build, full_rank_side,
                                     load_audio, materialize, plan)
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "exp_operator_sizing"
 RHOS = (0.5, 0.7, 0.85, 0.95, 0.98, 1.0)
 

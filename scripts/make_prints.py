@@ -30,8 +30,8 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from loopviz.bt import scorer_from_weights
-from loopviz.pool import candidate_dir, iter_candidate_files, slug
+from loopviz.paper.bt import scorer_from_weights
+from loopviz.paper.pool import candidate_dir, iter_candidate_files, slug
 
 ROOT = Path(__file__).parent.parent
 OUT = ROOT / "runs" / "prints"

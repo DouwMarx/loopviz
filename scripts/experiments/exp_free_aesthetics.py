@@ -24,16 +24,16 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from loopviz.config import OptConfig, ZConfig
-from loopviz.loss import equal_weights, loss_vector, scalar_loss
-from loopviz.metrics import METRIC_NAMES, features
-from loopviz.optimize import EvalResult, run_es
-from loopviz.render import render, save_png
-from loopviz.zspace import generate_Z, theta_to_params
+from loopviz.paper.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.paper.metrics import METRIC_NAMES, features
+from loopviz.paper.optimize import EvalResult, run_es
+from loopviz.paper.render import render, save_png
+from loopviz.paper.zspace import generate_Z, theta_to_params
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 D = 96000  # ambient dimension; visual character is D-insensitive
 
 

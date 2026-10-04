@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from loopviz.render import (block_grams, energy_image, mean_image,
+from loopviz.paper.render import (block_grams, energy_image, mean_image,
                                 pool_rows, render, save_png)
-from loopviz.zspace import PARAM_NAMES, theta_to_params
+from loopviz.paper.zspace import PARAM_NAMES, theta_to_params
 
 
 @pytest.fixture

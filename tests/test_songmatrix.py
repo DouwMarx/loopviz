@@ -4,8 +4,8 @@ modes (matviz)."""
 import numpy as np
 import pytest
 
-from loopviz import matviz
-from loopviz.sheet import make_sheet
+from loopviz.paper import matviz
+from loopviz.paper.sheet import make_sheet
 from loopviz.songmatrix import (Plan, build, full_rank_side, materialize,
                                     plan)
 

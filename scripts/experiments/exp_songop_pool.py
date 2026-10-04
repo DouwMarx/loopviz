@@ -34,17 +34,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz.loss import equal_weights, loss_vector, scalar_loss
-from loopviz.matviz import gray
-from loopviz.metrics import METRICS, features
-from loopviz.render import save_png
-from loopviz.sheet import make_sheet
+from loopviz.paper.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.paper.matviz import gray
+from loopviz.paper.metrics import METRICS, features
+from loopviz.paper.render import save_png
+from loopviz.paper.sheet import make_sheet
 from loopviz.songmatrix import (Plan, build, load_audio, loop_degradation,
                                     materialize)
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "exp_songop_pool"
 CLIPS = (99.5, 99.9)
 SECONDS_PER_YEAR = 3600 * 24 * 365.25

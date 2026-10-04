@@ -1,6 +1,6 @@
 import json
 
-from loopviz.pool import candidate_dir, iter_candidate_files, slug, song_dir
+from loopviz.paper.pool import candidate_dir, iter_candidate_files, slug, song_dir
 
 
 def _mk(d, cid):

@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from loopviz import bt
-from loopviz.metrics import N_METRICS
+from loopviz.paper import bt
+from loopviz.paper.metrics import N_METRICS
 
 
 def _synthetic_world(rng, n_candidates=20, sharpness=6.0):
@@ -104,7 +104,7 @@ def test_active_selection_prefers_uncertain_pairs():
 
 def test_select_pairs_respects_blocks():
     import numpy as np
-    from loopviz.bt import select_pairs
+    from loopviz.paper.bt import select_pairs
 
     rng = np.random.default_rng(0)
     lv = {f"c{i}": rng.random(4) for i in range(6)}
@@ -170,7 +170,7 @@ def test_scorer_from_weights_quad_and_fallback():
     comps = _simulate_quad(rng, phi, u_true, n=800)
     model = bt.quad_fit(comps, phi, l2=1.0)
 
-    from loopviz.metrics import METRIC_NAMES
+    from loopviz.paper.metrics import METRIC_NAMES
     as_dict = {cid: dict(zip(METRIC_NAMES, v)) for cid, v in phi.items()}
 
     score = bt.scorer_from_weights({"quad": model})
@@ -180,7 +180,7 @@ def test_scorer_from_weights_quad_and_fallback():
         -bt.quad_utility(phi[a], model))
 
     # legacy file without "quad" falls back to w_raw on loss vectors
-    from loopviz.loss import loss_vector_from_phi_dict
+    from loopviz.paper.loss import loss_vector_from_phi_dict
     w = rng.random(N_METRICS)
     score_lin = bt.scorer_from_weights({"w_raw": list(w)})
     assert score_lin(as_dict[a]) == pytest.approx(

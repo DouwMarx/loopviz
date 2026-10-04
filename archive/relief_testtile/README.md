@@ -1,5 +1,7 @@
 # test tiles: print these before the 300 mm relief
 
+These belong to `loopviz relief`, the stepped predecessor of `loopviz plate`.
+
 One STL per cell pitch. Each is 12 cells wide; the bottom 12 rows (y from
 0) are the actual corner of the full-size print at that pitch, with the
 same 2.0 mm base, 6.0 mm relief and 0.2 mm level

@@ -2,13 +2,13 @@ import numpy as np
 import pytest
 
 from loopviz.config import OptConfig, ZConfig
-from loopviz.loss import (barrier, equal_weights, loss_vector,
+from loopviz.paper.loss import (barrier, equal_weights, loss_vector,
                               loss_vector_from_phi_dict, sample_weights,
                               scalar_loss)
-from loopviz.metrics import METRIC_NAMES, N_METRICS, TARGETS
+from loopviz.paper.metrics import METRIC_NAMES, N_METRICS, TARGETS
 from loopviz.operator import PlaylistOperator
-from loopviz.optimize import run_es
-from loopviz.zspace import (N_PARAMS, PARAM_RANGES, generate_Z,
+from loopviz.paper.optimize import run_es
+from loopviz.paper.zspace import (N_PARAMS, PARAM_RANGES, generate_Z,
                                 theta_to_params)
 
 

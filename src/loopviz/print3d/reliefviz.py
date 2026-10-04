@@ -34,29 +34,55 @@ def _shade(V: np.ndarray, F: np.ndarray, light=(0.4, -0.6, 0.7)) -> np.ndarray:
     return 0.35 + 0.6 * lam
 
 
+DEFAULT_VIEWS = [("top", 90, -90), ("front-left", 35, -60),
+                 ("front-right", 35, -120), ("low oblique", 18, -40)]
+
+
 def mesh_views(V: np.ndarray, F: np.ndarray, path: Path, title: str = "",
-               dpi: int = 130) -> Path:
-    """Four shaded views of the exact mesh."""
+               dpi: int = 130, views: list[tuple[str, float, float]] | None = None,
+               face_colors: np.ndarray | None = None) -> Path:
+    """Shaded views of the exact mesh.
+
+    views       : list of (name, elev, azim); default DEFAULT_VIEWS (top and
+                  three obliques). Negative elev looks from below.
+    face_colors : (nf, 3) floats in [0, 1] or None. When given, the flat
+                  shading multiplies the colour so geometry stays readable.
+    """
+    views = DEFAULT_VIEWS if views is None else views
     lo, hi = V.min(axis=0), V.max(axis=0)
     span = hi - lo
-    shade = _shade(V, F)
-    views = [("top", 90, -90), ("front-left", 35, -60),
-             ("front-right", 35, -120), ("low oblique", 18, -40)]
-    fig = plt.figure(figsize=(12, 10))
+    fc = None
+    if face_colors is not None:
+        fc = np.asarray(face_colors, float)
+        if fc.shape != (F.shape[0], 3):
+            raise ValueError(f"face_colors must be (nf, 3), got {fc.shape}")
+
+    def colours(elev):
+        shade = _shade(V, F, light=(0.4, -0.6, 0.7 if elev >= 0 else -0.7))
+        if fc is None:
+            return np.repeat(shade[:, None], 3, axis=1)
+        return np.clip(fc * (0.5 + 0.5 * shade[:, None]) / 0.95, 0.0, 1.0)
+
+    n = len(views)
+    rows = 1 if n <= 2 else 2
+    cols = (n + rows - 1) // rows
+    fig = plt.figure(figsize=(6 * cols, 5 * rows))
     for k, (name, elev, azim) in enumerate(views, 1):
-        ax = fig.add_subplot(2, 2, k, projection="3d")
-        tris = V[F]
-        pc = Poly3DCollection(tris, linewidths=0.15, edgecolors="#333333")
-        pc.set_facecolor(np.repeat(shade[:, None], 3, axis=1))
+        ax = fig.add_subplot(rows, cols, k, projection="3d")
+        pc = Poly3DCollection(V[F], linewidths=0.15, edgecolors="#333333")
+        pc.set_facecolor(colours(elev))
         ax.add_collection3d(pc)
         ax.set_xlim(lo[0], hi[0])
         ax.set_ylim(lo[1], hi[1])
-        ax.set_zlim(0, hi[2])
+        ax.set_zlim(min(0.0, lo[2]), hi[2])
         ax.set_box_aspect((span[0], span[1], max(span[2], 1e-9)))
         ax.view_init(elev=elev, azim=azim)
         ax.set_xlabel("x mm")
         ax.set_ylabel("y mm")
         ax.set_zlabel("z mm")
+        if abs(elev) >= 89:                     # straight down or up: no z axis
+            ax.set_zticks([])
+            ax.set_zlabel("")
         ax.set_title(name)
     fig.suptitle(title)
     fig.tight_layout()
@@ -91,7 +117,7 @@ def hillshade(H: np.ndarray, pitch_mm: float, path: Path, title: str = "",
 
 
 def heightmap_png(H: np.ndarray, path: Path) -> Path:
-    from .render import _write_png16_gray
+    from ..paper.render import _write_png16_gray
 
     z = (H - H.min()) / max(H.max() - H.min(), 1e-30)
     _write_png16_gray((z * 65535).astype("<u2"), path)

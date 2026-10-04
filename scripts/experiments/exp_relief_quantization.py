@@ -26,13 +26,13 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz.relief import quantized_matrix
-from loopviz.relief_cli import load_loop
+from loopviz.loopspec import load_loop
+from loopviz.print3d.relief import quantized_matrix
 from loopviz.songmatrix import Plan, build, loop_degradation, materialize
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "relief" / "exp_quantization"
 LEVELS = (16, 32, 64, 256, 1024, 4096, 65536)
 CLIPS = (99.5, 100.0)

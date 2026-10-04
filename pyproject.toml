@@ -27,3 +27,5 @@ packages = ["src/loopviz"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["visual: needs the claude CLI and network; run with -m visual"]
+addopts = "-m 'not visual'"

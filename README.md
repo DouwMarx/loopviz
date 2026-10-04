@@ -23,32 +23,57 @@ See `doc/math.pdf` for a derivation.
 ## Pipeline
 
 ```
-loopviz download --csv tracks.csv     # audio, 16 kHz
-scripts/exp_paper_sweep.py            # exact candidates per paper size
-loopviz compare                       # pairwise choices in the browser
-loopviz fit                           # preference model
-scripts/make_prints.py                # print-exact PDFs, 100% scale only
-loopviz relief sweep|build|demo       # the same operator as a 3D-printed relief
+loopviz download --csv tracks.csv            # audio, 16 kHz
+scripts/experiments/exp_paper_sweep.py       # exact candidates per paper size
+loopviz compare                              # pairwise choices in the browser
+loopviz fit                                  # preference model
+scripts/make_prints.py                       # print-exact PDFs, 100% scale only
+loopviz relief sweep|build|demo              # legacy: stepped relief, one bed
+loopviz plate plan|build|demo                # one big smooth relief, strips printed on edge
+loopviz plate export                         # package: audio, spec sheet, STLs, renders
+```
+
+A loop is named once in `loops/<name>.json` (audio file, start, end, title,
+notes) and passed as `--loop loops/armed_man.json` to every `plate` and
+`relief` command in place of `--audio --start --end`.
+
+## Layout
+
+```
+src/loopviz/           core: operator.py (A from windows), songmatrix.py (one song as n x n),
+                       ingest.py, config.py, loopspec.py (loops/<name>.json), cli.py
+src/loopviz/paper/     paper prints: render, metrics, loss, optimize, zspace, palette,
+                       compare_server, bt (Bradley-Terry), pool, sheet, matviz
+src/loopviz/print3d/   3D prints: surface, slab, strippack, plate, export (the strip plate);
+                       relief, relief_cli, reliefviz (legacy stepped design)
+scripts/               make_prints, slice_metrics, pitch_sheet, render_stl; experiments/exp_*.py
+doc/                   math.pdf (derivation), plate.md (strip plate), relief.md (legacy)
+archive/               relief_testtile (calibration tiles of the stepped design), early specs
 ```
 
 ## 3D print
 
-`loopviz relief` displays the operator as a height field: one square
-column per entry, height = entry, on a bed of up to 305 mm. Cell pitch
-sets the sample rate (`f = rho n^2 / T`, `n = side / pitch`) and layer
-height sets the number of distinguishable heights (~5-6 bits on FDM).
-The STL is built directly from the matrix (watertight, stepped, no CAD
-kernel) and every column top sits on a layer boundary. See `doc/relief.md`
-for sizing, printer limits and what the quantized object still plays.
-`prints/testtile/` holds ready-to-print calibration tiles (the 12x12 corner
-of the full print at 1.5, 2, 2.5 and 3 mm pitch plus staircases and
-checkerboards): print those first.
+Two designs, both watertight STL (stereolithography mesh) files built
+directly from the matrix, no CAD kernel. `loopviz relief` is the first
+one: a stepped height field on one bed (up to 305 mm), one column per
+entry, levels set by the layer height; `doc/relief.md` has sizing, printer
+limits and what the quantized object still plays, `archive/relief_testtile/`
+the calibration tiles. `loopviz plate` is bigger than the bed: the matrix
+interpolated to a smooth surface, 660 mm on a 340 mm bed, cut into 2 x 9
+strips that stand on edge and print side by side in one job, the relief
+traced in XY and its amplitude set by the overhang limit. `plan`
+enumerates strip layouts, `build` writes a print-ready `bed.stl` with
+engraved labels, assembly notes and metrics, `demo` makes tiny test
+plates, `export` packages a finished build (the loop and its playback by
+the exact and the as-printed operator as wavs, a spec sheet with every
+parameter and the commit, STLs, previews, renders, README). See
+`doc/plate.md`.
 
 ```
-loopviz relief sweep --audio song.wav --start 324.68 --end 338.18 --probe
-loopviz relief build --audio song.wav --start 324.68 --end 338.18 --pitch 1.5
-loopviz relief testtile --audio song.wav --start 324.68 --end 338.18  # calibration tiles
-loopviz relief demo --audio song.wav --start 324.68 --end 338.18      # 2x2 .. 12x12 test meshes
+loopviz relief build --loop loops/armed_man.json --pitch 1.5
+loopviz plate plan
+loopviz plate build --loop loops/armed_man.json --pitch 2 --side 660 --cols 2 --rows 9 --thickness 10
+loopviz plate export --build runs/plate/armed_man_p2 --out export/armed_man_p2 --zip
 ```
 
 ## Choosing by comparison
@@ -62,6 +87,11 @@ utility on 12 image metrics that ranks the pool per (song, paper).
 
 ```
 uv venv && uv pip install -e ".[dev]" && uv run pytest
+uv run pytest -m visual
 ```
+
+The visual tests render tiny plates and have headless Claude judge the
+pictures (orientation, labels, smoothness, overhang colouring); they are
+skipped by default and need the `claude` CLI.
 
 Requires `ffmpeg` (and `node` for YouTube downloads).

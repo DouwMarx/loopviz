@@ -103,9 +103,10 @@ def load_audio(paths: list[Path]) -> tuple[np.ndarray, float]:
     return np.concatenate(parts), T
 
 
-def build(signal: np.ndarray, pl: Plan,
-          dither_db: float = -70.0) -> tuple[PlaylistOperator, np.ndarray]:
-    """Resample signal to pl.samples, window it, return (operator, W).
+def windows(signal: np.ndarray, pl: Plan, dither_db: float | None = -70.0) -> np.ndarray:
+    """The raw (un-normalised) window matrix: resample signal to pl.samples,
+    add the dither floor, cut into N columns of n samples (column k =
+    window k, samples [k n, (k + 1) n)).
 
     dither_db: inaudible noise floor added before windowing (relative to
     the song's RMS, deterministic seed). Required whenever the audio has
@@ -120,7 +121,14 @@ def build(signal: np.ndarray, pl: Plan,
         rng = np.random.default_rng(7)
         song = song + (10 ** (dither_db / 20) * np.std(song)
                        * rng.standard_normal(song.size))
-    W = song.reshape(pl.N, pl.n).T          # column k = window k
+    return song.reshape(pl.N, pl.n).T
+
+
+def build(signal: np.ndarray, pl: Plan,
+          dither_db: float = -70.0) -> tuple[PlaylistOperator, np.ndarray]:
+    """Resample signal to pl.samples, window it (see `windows`), normalise
+    every window to unit norm, return (operator, W)."""
+    W = windows(signal, pl, dither_db)
     W = W / np.linalg.norm(W, axis=0, keepdims=True)
     return PlaylistOperator.from_songs(W), W
 

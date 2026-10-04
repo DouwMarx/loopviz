@@ -1,0 +1,8 @@
+{
+ "audio": "data/audio_3d/song.wav",
+ "start_s": 324.68,
+ "end_s": 336.705,
+ "name": "armed_man",
+ "title": "The Armed Man: A Mass for Peace, XII. Benedictus (Karl Jenkins)",
+ "notes": "loop ends on the timpani hit 12.025 s after the start (cross-correlation of the low-band envelope)"
+}

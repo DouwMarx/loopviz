@@ -14,10 +14,10 @@ from typing import Callable
 
 import numpy as np
 
-from .config import OptConfig, RenderConfig, ZConfig
+from ..config import OptConfig, RenderConfig, ZConfig
+from ..operator import PlaylistOperator
 from .loss import scalar_loss
 from .metrics import features
-from .operator import PlaylistOperator
 from .render import render
 from .zspace import N_PARAMS, generate_Z, theta_to_params
 

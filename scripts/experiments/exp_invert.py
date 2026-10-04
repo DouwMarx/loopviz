@@ -24,15 +24,15 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz.bt import scorer_from_weights
-from loopviz.loss import equal_weights, loss_vector, scalar_loss
-from loopviz.metrics import METRICS, features
-from loopviz.pool import candidate_dir, iter_candidate_files
-from loopviz.sheet import make_sheet
+from loopviz.paper.bt import scorer_from_weights
+from loopviz.paper.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.paper.metrics import METRICS, features
+from loopviz.paper.pool import candidate_dir, iter_candidate_files
+from loopviz.paper.sheet import make_sheet
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "exp_invert"
 Image.MAX_IMAGE_PIXELS = None
 

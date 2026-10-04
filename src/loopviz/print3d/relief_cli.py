@@ -1,6 +1,7 @@
 """`loopviz relief`: size, build and preview a 3D-printed song operator.
 
   loopviz relief sweep --audio song.wav --start 324.68 --end 338.18
+      (or --loop loops/armed_man.json for every command that takes audio)
       pitch -> (n, f, levels, bits) table for the printer; with --probe
       also the largest stable f and the playback of the quantized object
   loopviz relief build --audio song.wav --start 324.68 --end 338.18 --pitch 1.2
@@ -20,8 +21,13 @@ import json
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
 
+from ..loopspec import (  # noqa: F401  load_loop re-exported for scripts
+    add_loop_args,
+    load_loop,
+    resolve_loop,
+)
+from ..songmatrix import Plan, build, loop_degradation, materialize
 from .relief import (
     PRINTERS,
     ReliefPlan,
@@ -36,27 +42,10 @@ from .relief import (
     write_stl,
 )
 from .reliefviz import heightmap_png, hillshade, mesh_views, sheet
-from .songmatrix import Plan, build, loop_degradation, materialize
 
 DEFAULT_PITCHES = (0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0)
 RHO_CAP = 0.97          # measured existence limit (exp_operator_sizing)
 RHO_FLOOR = 0.3
-
-
-def load_loop(audio: Path, start: float | None, end: float | None,
-              out_wav: Path | None = None) -> tuple[np.ndarray, float, int]:
-    """The excerpt [start, end) seconds of a wav as (signal, T, sr)."""
-    x, sr = sf.read(str(audio), dtype="float64")
-    if x.ndim == 2:
-        x = x.mean(axis=1)
-    a = 0 if start is None else int(round(start * sr))
-    b = x.size if end is None else int(round(end * sr))
-    if not 0 <= a < b <= x.size:
-        raise SystemExit(f"loop [{start}, {end}) outside audio of {x.size / sr:.2f} s")
-    seg = x[a:b]
-    if out_wav is not None:
-        sf.write(str(out_wav), seg, sr)
-    return seg, seg.size / sr, sr
 
 
 def drift_of(A, W, loops: int = 1) -> float:
@@ -146,8 +135,9 @@ def cmd_sweep(args) -> None:
     pr = printer(args.printer, bed_mm=args.bed, layer_mm=args.layer,
                  margin_mm=args.margin, max_aspect=args.max_aspect,
                  step_layers=args.step_layers)
-    signal, T, sr = load_loop(Path(args.audio), args.start, args.end)
-    print(f"loop {args.start}..{args.end} s: T = {T:.2f} s, source {sr} Hz; "
+    spec = resolve_loop(args)
+    signal, T, sr = spec.signal()
+    print(f"loop {spec.name} {spec.start_s}..{spec.end_s} s: T = {T:.2f} s, source {sr} Hz; "
           f"printer {pr.name}: side {pr.side_mm:.0f} mm, layer {pr.layer_mm} mm, "
           f"nozzle {pr.nozzle_mm} mm")
     side = args.tiles * pr.side_mm     # for the banner only; n = k * floor(S/p)
@@ -193,10 +183,10 @@ def cmd_build(args) -> None:
     pr = printer(args.printer, bed_mm=args.bed, layer_mm=args.layer,
                  margin_mm=args.margin, max_aspect=args.max_aspect,
                  step_layers=args.step_layers)
-    out = Path(args.out or f"runs/relief/{Path(args.audio).stem}_p{args.pitch:g}")
+    spec = resolve_loop(args)
+    out = Path(args.out or f"runs/relief/{spec.name}_p{args.pitch:g}")
     out.mkdir(parents=True, exist_ok=True)
-    signal, T, sr = load_loop(Path(args.audio), args.start, args.end,
-                              out_wav=out / "loop.wav")
+    signal, T, sr = spec.signal(out_wav=out / "loop.wav")
     rp = relief_plan(T, pr, args.pitch, rho=args.rho, relief_mm=args.relief,
                      base_mm=args.base, tiles=args.tiles)
     if args.rho_max:
@@ -243,8 +233,8 @@ def cmd_build(args) -> None:
     if rp.n <= 60:
         mesh_views(V, F, out / "mesh_views.png", title=out.name)
     meta = {
-        "audio": str(args.audio), "start_s": args.start, "end_s": args.end,
-        "tiles": args.tiles,
+        "audio": str(spec.audio), "start_s": spec.start_s, "end_s": spec.end_s,
+        "loop": spec.to_dict(), "tiles": args.tiles,
         "T_s": T, "source_hz": sr, "printer": pr.__dict__,
         "n": rp.n, "N": pl.N, "rho": pl.rho, "f_hz": pl.f,
         "pitch_mm": rp.pitch_mm, "side_mm": rp.side_mm, "relief_mm": rp.relief_mm,
@@ -276,8 +266,8 @@ def cmd_demo(args) -> None:
     rng = np.random.default_rng(3)
     cases = dict(DEMOS)
     cases["4x4_random"] = 1.0 + 0.1 * rng.integers(0, 30, (4, 4))
-    if args.audio:
-        signal, T, _ = load_loop(Path(args.audio), args.start, args.end)
+    if args.audio or args.loop:
+        signal, T, _ = resolve_loop(args).signal()
         rp = relief_plan(T, pr, pitch, rho=0.8, side_mm=12 * pitch, relief_mm=5.0)
         assert rp.n == 12
         r = probe(signal, T, rp.n, rp.plan.rho)
@@ -347,7 +337,8 @@ def cmd_testtile(args) -> None:
                  step_layers=args.step_layers)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    signal, T, _ = load_loop(Path(args.audio), args.start, args.end)
+    spec = resolve_loop(args)
+    signal, T, _ = spec.signal()
     c = args.cells
     lines, pngs = [], []
     for pitch in args.pitches:
@@ -394,7 +385,7 @@ is the smallest you can see and feel, do the spikes print clean.
 |---|---|---|---|---|---|---|
 {chr(10).join(lines)}
 
-Loop {args.start} to {args.end} s of {Path(args.audio).name}; printer preset
+Loop {spec.start_s} to {spec.end_s} s of {spec.audio.name} ({spec.name}); printer preset
 {pr.name} ({pr.nozzle_mm} mm nozzle).
 """)
     print(f"wrote {out}/README.md")
@@ -405,10 +396,8 @@ def add_parser(sub) -> None:
                                       "song operator")
     ss = p.add_subparsers(dest="relief_cmd", required=True)
 
-    def common(q, pitch=True):
-        q.add_argument("--audio", required=True)
-        q.add_argument("--start", type=float, default=None, help="loop start (s)")
-        q.add_argument("--end", type=float, default=None, help="loop end (s)")
+    def common(q):
+        add_loop_args(q)
         q.add_argument("--printer", default="fdm04", choices=sorted(PRINTERS))
         q.add_argument("--bed", type=float, default=None, help="bed side (mm)")
         q.add_argument("--margin", type=float, default=None, help="per side (mm)")
@@ -463,7 +452,5 @@ def add_parser(sub) -> None:
     q.add_argument("--out", default="runs/relief/demo")
     q.add_argument("--pitch", type=float, default=2.0)
     q.add_argument("--printer", default="fdm04", choices=sorted(PRINTERS))
-    q.add_argument("--audio", help="also a 12x12 cut of this song")
-    q.add_argument("--start", type=float, default=None)
-    q.add_argument("--end", type=float, default=None)
+    add_loop_args(q, required=False)        # also a 12x12 cut of this song
     q.set_defaults(fn=cmd_demo)

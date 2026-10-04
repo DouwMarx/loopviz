@@ -443,7 +443,7 @@ def save_config(spec: PaletteSpec, source: Path, out_dir: Path,
         "gamut": gamut_report(spec),
         "preview": preview.name,
         "provenance": {
-            "tool": "loopviz.palette",
+            "tool": "loopviz.paper.palette",
             "git_commit": _git_commit(root),
             "created_utc": datetime.now(timezone.utc).isoformat(
                 timespec="seconds"),

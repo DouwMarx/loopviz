@@ -1,6 +1,6 @@
 """Command-line pipeline.
 
-  loopviz download --links-file links.txt      # or --link URL (repeat)
+  loopviz download --csv tracks.csv            # or --link URL (repeat)
   loopviz build                                 # X, factors, verification
   loopviz optimize --schedule                   # baseline + Dirichlet sweep
   loopviz optimize --baseline                   # equal weights only
@@ -10,6 +10,7 @@
   loopviz render <candidate> --resolution 4096  # print-quality export
   loopviz report                                # common-yardstick table
   loopviz relief sweep|build|demo               # 3D-printed height field
+  loopviz plate build|demo|plan                 # big smooth relief as on-edge strips
 """
 
 from __future__ import annotations
@@ -20,19 +21,32 @@ from pathlib import Path
 
 import numpy as np
 
-from . import bt
 from .config import AudioConfig, OptConfig, Paths, RenderConfig, ZConfig
-from .ingest import (build_song_matrix, download, load_matrix, read_titles,
-                     save_matrix, song_durations, window_seconds)
-from .loss import (DEFAULT_SCHEDULE, equal_weights, loss_vector,
-                   loss_vector_from_phi_dict, sample_weights, scalar_loss)
-from .metrics import METRIC_NAMES, N_METRICS, features
+from .ingest import (
+    build_song_matrix,
+    download,
+    load_matrix,
+    read_titles,
+    save_matrix,
+    song_durations,
+    window_seconds,
+)
 from .operator import PlaylistOperator
-from .optimize import make_objective, run_es
-from .pool import candidate_dir, iter_candidate_files
-from .render import render, save_png
-from . import relief_cli
-from .zspace import generate_Z, theta_to_params
+from .paper import bt
+from .paper.loss import (
+    DEFAULT_SCHEDULE,
+    equal_weights,
+    loss_vector,
+    loss_vector_from_phi_dict,
+    sample_weights,
+    scalar_loss,
+)
+from .paper.metrics import METRIC_NAMES, N_METRICS, features
+from .paper.optimize import make_objective, run_es
+from .paper.pool import candidate_dir, iter_candidate_files
+from .paper.render import render, save_png
+from .paper.zspace import generate_Z, theta_to_params
+from .print3d import plate, relief_cli
 
 
 def _paths(args) -> Paths:
@@ -241,7 +255,7 @@ def cmd_render(args) -> None:
 
 
 def cmd_compare(args) -> None:
-    from .compare_server import serve
+    from .paper.compare_server import serve
     paths = _paths(args)
     serve(paths.runs, paths.comparisons, port=args.port)
 
@@ -292,7 +306,7 @@ def _best_candidate(paths: Paths) -> str:
 
 
 def cmd_palette(args) -> None:
-    from . import palette
+    from .paper import palette
     paths = _paths(args)
     target = args.target or _best_candidate(paths)
     source, out_dir, source_id = _resolve_source(paths, target)
@@ -304,7 +318,7 @@ def cmd_palette(args) -> None:
         print(f"wrote {out}")
         return
 
-    from .palette_server import serve
+    from .paper.palette_server import serve
     serve(source, out_dir, source_id=source_id, port=args.port)
 
 
@@ -420,7 +434,8 @@ def cmd_top(args) -> None:
               f"drift {d.get('loop_drift_per_pass', 0):.0e}  [{d['id']}]")
 
     from PIL import Image
-    from .sheet import make_sheet
+
+    from .paper.sheet import make_sheet
 
     def sheet_of(cs, out):
         tiles = []
@@ -548,6 +563,7 @@ def main(argv=None) -> None:
     p.set_defaults(fn=cmd_top)
 
     relief_cli.add_parser(sub)
+    plate.add_parser(sub)
 
     args = ap.parse_args(argv)
     args.fn(args)

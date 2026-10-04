@@ -47,7 +47,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .songmatrix import Plan, plan
+from ..songmatrix import Plan, plan
 
 # -- printers ------------------------------------------------------------------
 

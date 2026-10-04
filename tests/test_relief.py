@@ -5,7 +5,7 @@ quantization must round-trip through the STL."""
 import numpy as np
 import pytest
 
-from loopviz.relief import (
+from loopviz.print3d.relief import (
     Printer,
     check_mesh,
     heightfield_mesh,
@@ -108,7 +108,7 @@ def test_plan_geometry_and_levels():
 
 
 def test_max_protrusion_is_local_not_range():
-    from loopviz.relief import max_protrusion
+    from loopviz.print3d.relief import max_protrusion
 
     ramp = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])
     assert max_protrusion(ramp) == 1.0          # 5 mm range, 1 mm steps
@@ -167,7 +167,7 @@ def test_cli_testtile(tmp_path):
     import soundfile as sf
 
     from loopviz.cli import main
-    from loopviz.relief_cli import TILE_ROWS
+    from loopviz.print3d.relief_cli import TILE_ROWS
 
     sr = 4000
     t = np.arange(int(2.0 * sr)) / sr
@@ -220,7 +220,7 @@ def test_cli_build_end_to_end(tmp_path):
 
 
 def test_tiles_partition_the_height_map(tmp_path):
-    from loopviz.relief_cli import write_tiles
+    from loopviz.print3d.relief_cli import write_tiles
 
     rng = np.random.default_rng(2)
     H = 2.0 + 0.1 * rng.integers(0, 20, (10, 8))

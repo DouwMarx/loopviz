@@ -4,8 +4,9 @@ __pycache__/
 .pytest_cache/
 data/
 runs/
+export/
 doc/*.aux
 doc/*.log
 doc/*.out
 .claude/
-prints/testtile/testtile_p*.png
+archive/relief_testtile/testtile_p*.png

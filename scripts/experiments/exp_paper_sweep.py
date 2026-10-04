@@ -32,17 +32,17 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz.loss import equal_weights, loss_vector, scalar_loss
-from loopviz.matviz import gray
-from loopviz.metrics import METRICS, features
-from loopviz.pool import candidate_dir, song_dir
-from loopviz.render import save_png
+from loopviz.paper.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.paper.matviz import gray
+from loopviz.paper.metrics import METRICS, features
+from loopviz.paper.pool import candidate_dir, song_dir
+from loopviz.paper.render import save_png
 from loopviz.songmatrix import (Plan, build, load_audio, loop_degradation,
                                     materialize)
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "exp_paper_sweep"
 
 PITCH_MM = 0.25          # discernible nose-to-paper; printers sharp to ~0.2

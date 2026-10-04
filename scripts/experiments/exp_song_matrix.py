@@ -24,14 +24,14 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz.matviz import gray
-from loopviz.render import save_png
-from loopviz.sheet import make_sheet
+from loopviz.paper.matviz import gray
+from loopviz.paper.render import save_png
+from loopviz.paper.sheet import make_sheet
 from loopviz.songmatrix import Plan, build, load_audio, materialize
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "exp_song_matrix"
 
 

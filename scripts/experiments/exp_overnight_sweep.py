@@ -27,16 +27,16 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from loopviz.loss import equal_weights, loss_vector, scalar_loss
-from loopviz.matviz import gray
-from loopviz.metrics import METRICS, features
-from loopviz.render import save_png
+from loopviz.paper.loss import equal_weights, loss_vector, scalar_loss
+from loopviz.paper.matviz import gray
+from loopviz.paper.metrics import METRICS, features
+from loopviz.paper.render import save_png
 from loopviz.songmatrix import (Plan, build, load_audio, loop_degradation,
                                     materialize)
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "runs" / "exp_overnight_sweep"
 FREQS = (8000.0, 10000.0, 12000.0, 6000.0, 5000.0)  # preference-ordered
 CLIPS = (99.5, 99.7, 99.9)
