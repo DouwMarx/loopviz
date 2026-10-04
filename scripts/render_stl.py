@@ -116,7 +116,7 @@ def main():
             if ortho:
                 cmd.append("--camera-orthographic")
         t0 = time.time()
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
         os.unlink(t.name)
         if res.returncode or not png.exists():
             sys.exit(f"f3d failed for {name}:\n{res.stderr}\n{' '.join(cmd)}")
