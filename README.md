@@ -59,21 +59,25 @@ one: a stepped height field on one bed (up to 305 mm), one column per
 entry, levels set by the layer height; `doc/relief.md` has sizing, printer
 limits and what the quantized object still plays, `archive/relief_testtile/`
 the calibration tiles. `loopviz plate` is bigger than the bed: the matrix
-interpolated to a smooth surface, 660 mm on a 340 mm bed, cut into 2 x 9
+interpolated to a smooth surface, 660 mm on a 340 mm bed, cut into 2 x 7
 strips that stand on edge and print side by side in one job, the relief
-traced in XY and its amplitude set by the overhang limit. `plan`
-enumerates strip layouts, `build` writes a print-ready `bed.stl` with
-engraved labels, assembly notes and metrics, `demo` makes tiny test
-plates, `export` packages a finished build (the loop and its playback by
-the exact and the as-printed operator as wavs, a spec sheet with every
-parameter and the commit, STLs, previews, renders, README). See
-`doc/plate.md`.
+traced in XY and its amplitude set by the overhang limit and the strip
+thickness. `plan` enumerates strip layouts, `build` writes a print-ready
+`bed.stl` with engraved labels, assembly notes and metrics, `demo` makes
+tiny test plates, `export` packages a finished build (the loop and its
+playback by the exact and the as-printed operator as wavs, a spec sheet
+with every parameter and the commit, STLs, previews, renders, README).
+The shipped builds use Fourier interpolation and no clipping
+(`--interp fourier --mapping none`), at rho 0.6 and 0.8. See
+`doc/plate.md` for the numbers and the design decisions.
 
 ```
 loopviz relief build --loop loops/armed_man.json --pitch 1.5
 loopviz plate plan
-loopviz plate build --loop loops/armed_man.json --pitch 2 --side 660 --cols 2 --rows 9 --thickness 10
-loopviz plate export --build runs/plate/armed_man_p2 --out export/armed_man_p2 --zip
+loopviz plate build --loop loops/armed_man.json --pitch 1.5 --rho 0.6 --side 660 --cols 2 --rows 7 \
+    --thickness 13 --relief auto --interp fourier --mapping none --subdiv 4 \
+    --out runs/plate/armed_man_p1.5_rho0.6_fourier_t13
+loopviz plate export --build runs/plate/armed_man_p1.5_rho0.6_fourier_t13 --out export/armed_man_p1.5_rho0.6 --zip
 ```
 
 ## Choosing by comparison

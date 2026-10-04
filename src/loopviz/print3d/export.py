@@ -414,8 +414,10 @@ def export_build(build_dir: Path, out: Path, design_study: Path | None = None,
         if not spec.audio.exists():
             raise SystemExit(f"audio {spec.audio} of the loop not found; run from the project root")
         say(f"audio: {spec.name}, n = {metrics['n']}, N = {metrics['N']}")
+        # the plate clips only under the "clip" mapping; otherwise every entry is carried
+        clip = layout["params"]["clip_pct"] if layout["params"].get("mapping", "clip") == "clip" else 100.0
         audio = export_audio(spec, metrics["n"], metrics["N"], metrics["relief_mm"],
-                             layout["params"]["clip_pct"], out / "audio", build_dir / "loop.wav")
+                             clip, out / "audio", build_dir / "loop.wav")
         say(f"  exact drift per pass {audio['loop_reconstructed_x3']['drift_per_pass']}, as printed "
             f"{audio['loop_as_printed_x3']['drift_per_pass']} ({audio['loop_as_printed_x3']['levels']} levels)")
 
